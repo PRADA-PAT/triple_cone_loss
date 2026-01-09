@@ -1,22 +1,25 @@
 """
-Turning Zones Module for Figure-8 Drill Analysis.
+Turning Zones Module for Triple Cone Drill Analysis.
 
-Defines elliptical turning zones around the START cone and GATE2 area
-where players turn during Figure-8 drills. Zones are elliptical (not circular)
-to compensate for camera perspective distortion.
+Defines elliptical turning zones around cones where players turn during drills.
+Zones are elliptical (not circular) to compensate for camera perspective distortion.
 
 Key components:
 - TurningZone: Ellipse geometry with point-in-zone detection
-- TurningZoneConfig: Configuration for zone sizes and stretch factors
-- TurningZoneSet: Container for both zones with convenience methods
-- create_turning_zones(): Factory to create zones from Figure8Layout
-- draw_turning_zone()/draw_turning_zones(): Video visualization
+- TripleConeZoneConfig: Configuration for 3-zone triple cone drills
+- TripleConeZoneSet: Container for 3 zones (CONE1, CONE2, CONE3)
+- create_triple_cone_zones(): Factory for triple cone zones
+- draw_triple_cone_zones(): Video visualization
 
 Usage:
-    from f8_loss.detection.turning_zones import create_turning_zones
+    from detection.turning_zones import create_triple_cone_zones
 
-    layout = load_cone_annotations(parquet_dir)
-    zones = create_turning_zones(layout)
+    # Cone positions from parquet analysis (mean positions)
+    cone1 = (467, 801)   # LEFT/HOME
+    cone2 = (1393, 791)  # CENTER
+    cone3 = (2316, 778)  # RIGHT
+
+    zones = create_triple_cone_zones(cone1, cone2, cone3)
 
     if zones.is_in_turning_zone(ball_x, ball_y):
         print(f"Ball in: {zones.get_zone_at_point(ball_x, ball_y)}")
@@ -24,12 +27,9 @@ Usage:
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from .data_structures import Figure8Layout
 
 # Try to import OpenCV for drawing functions
 try:
@@ -46,14 +46,14 @@ except ImportError:
 @dataclass
 class TurningZone:
     """
-    Elliptical turning zone for Figure-8 drill.
+    Elliptical turning zone for Triple Cone drill.
 
     The ellipse is defined by center point, semi-axes, and optional rotation.
     Camera perspective distortion is handled via stretch factors applied
     during zone creation (semi_major vs semi_minor).
 
     Attributes:
-        name: Zone identifier ("START" or "GATE2")
+        name: Zone identifier ("CONE1", "CONE2", or "CONE3")
         center_px: X-coordinate of ellipse center (pixels)
         center_py: Y-coordinate of ellipse center (pixels)
         semi_major: Semi-major axis length (pixels) - typically horizontal
@@ -96,8 +96,6 @@ class TurningZone:
         y_rot = -dx * sin_t + dy * cos_t
 
         # Check ellipse equation: (x/a)² + (y/b)² <= 1
-        # semi_major = a (horizontal axis after rotation)
-        # semi_minor = b (vertical axis after rotation)
         if self.semi_major == 0 or self.semi_minor == 0:
             return False
 
@@ -111,8 +109,6 @@ class TurningZone:
     def get_boundary_points(self, num_points: int = 64) -> List[Tuple[int, int]]:
         """
         Generate points along the ellipse boundary.
-
-        Useful for polygon drawing or path analysis.
 
         Args:
             num_points: Number of points to generate around ellipse
@@ -168,91 +164,127 @@ class TurningZone:
         )
 
 
+# =============================================================================
+# TRIPLE CONE DRILL ZONE STRUCTURES
+# =============================================================================
+
 @dataclass
-class TurningZoneConfig:
+class TripleConeZoneConfig:
     """
-    Configuration for creating turning zones.
+    Configuration for creating triple cone drill turning zones.
 
-    Stretch factors compensate for camera perspective distortion:
-    - stretch_y > 1.0: Vertical stretch for tilted camera (typical: 1.2-1.5)
-    - stretch_x: Horizontal stretch (usually 1.0 for aligned cameras)
+    Triple cone drill has 3 cones in a horizontal line:
+    - CONE1 (LEFT): Home cone where player starts/returns
+    - CONE2 (CENTER): Middle cone
+    - CONE3 (RIGHT): Far right cone
 
-    Zone radii are specified in pixels directly for simplicity.
+    All 3 cones are turn points in the drill sequence:
+    CONE1 → CONE2(turn) → CONE1(turn) → CONE3(turn) → CONE1(turn) → repeat
 
     Attributes:
-        start_zone_radius: Base radius for START zone (pixels)
-        gate2_zone_radius: Base radius for GATE2 zone (pixels)
+        cone1_zone_radius: Base radius for CONE1/HOME zone (pixels)
+        cone2_zone_radius: Base radius for CONE2/CENTER zone (pixels)
+        cone3_zone_radius: Base radius for CONE3/RIGHT zone (pixels)
         stretch_x: Horizontal stretch factor (default: 1.0)
         stretch_y: Vertical compression factor for side-view camera (default: 5.0)
-        start_zone_rotation: Rotation of START zone ellipse (degrees)
-        gate2_zone_rotation: Rotation of GATE2 zone ellipse (degrees)
+        cone1_zone_rotation: Rotation of CONE1 zone ellipse (degrees)
+        cone2_zone_rotation: Rotation of CONE2 zone ellipse (degrees)
+        cone3_zone_rotation: Rotation of CONE3 zone ellipse (degrees)
     """
-    start_zone_radius: float = 150.0
-    gate2_zone_radius: float = 180.0
+    cone1_zone_radius: float = 150.0  # HOME cone
+    cone2_zone_radius: float = 150.0  # CENTER cone
+    cone3_zone_radius: float = 150.0  # RIGHT cone
     stretch_x: float = 1.0
     stretch_y: float = 5.0  # Heavy horizontal stretch for side-view camera
-    start_zone_rotation: float = 0.0
-    gate2_zone_rotation: float = 0.0
+    cone1_zone_rotation: float = 0.0
+    cone2_zone_rotation: float = 0.0
+    cone3_zone_rotation: float = 0.0
 
     @classmethod
-    def default(cls) -> 'TurningZoneConfig':
-        """Create default configuration."""
+    def default(cls) -> 'TripleConeZoneConfig':
+        """Create default configuration with equal zone sizes."""
         return cls()
 
     @classmethod
-    def for_overhead_camera(cls) -> 'TurningZoneConfig':
+    def for_overhead_camera(cls) -> 'TripleConeZoneConfig':
         """Configuration for nearly overhead camera (less distortion)."""
         return cls(stretch_y=1.1)
 
     @classmethod
-    def for_tilted_camera(cls) -> 'TurningZoneConfig':
+    def for_tilted_camera(cls) -> 'TripleConeZoneConfig':
         """Configuration for tilted camera (more distortion)."""
         return cls(stretch_y=1.5)
 
     @classmethod
-    def small_zones(cls) -> 'TurningZoneConfig':
+    def small_zones(cls) -> 'TripleConeZoneConfig':
         """Configuration with smaller, tighter zones."""
-        return cls(start_zone_radius=80.0, gate2_zone_radius=100.0)
+        return cls(
+            cone1_zone_radius=80.0,
+            cone2_zone_radius=80.0,
+            cone3_zone_radius=80.0
+        )
 
     @classmethod
-    def large_zones(cls) -> 'TurningZoneConfig':
+    def large_zones(cls) -> 'TripleConeZoneConfig':
         """Configuration with larger, more generous zones."""
-        return cls(start_zone_radius=200.0, gate2_zone_radius=220.0)
+        return cls(
+            cone1_zone_radius=200.0,
+            cone2_zone_radius=200.0,
+            cone3_zone_radius=200.0
+        )
 
 
 @dataclass
-class TurningZoneSet:
+class TripleConeZoneSet:
     """
-    Container for both turning zones in a Figure-8 drill.
+    Container for all three turning zones in a Triple Cone drill.
 
-    Provides convenience methods for checking zone containment.
+    Triple cone drill pattern:
+    ```
+      CONE1 (LEFT)     CONE2 (CENTER)     CONE3 (RIGHT)
+         "HOME"
+           │
+           ├──────────→ TURN ←────────┐
+           │             │            │
+           │←────────────┘            │
+           │ TURN                     │
+           ├───────────────────────→ TURN
+           │                          │
+           │←─────────────────────────┘
+           │ TURN
+         END (1 rep)
+    ```
 
     Attributes:
-        start_zone: Elliptical zone around START cone
-        gate2_zone: Elliptical zone around GATE2 midpoint
+        cone1_zone: Elliptical zone around CONE1 (HOME/LEFT)
+        cone2_zone: Elliptical zone around CONE2 (CENTER)
+        cone3_zone: Elliptical zone around CONE3 (RIGHT)
         config: Configuration used to create these zones
     """
-    start_zone: TurningZone
-    gate2_zone: TurningZone
-    config: TurningZoneConfig = field(default_factory=TurningZoneConfig)
+    cone1_zone: TurningZone  # LEFT/HOME
+    cone2_zone: TurningZone  # CENTER
+    cone3_zone: TurningZone  # RIGHT
+    config: TripleConeZoneConfig = field(default_factory=TripleConeZoneConfig)
 
     def get_zone_at_point(self, x: float, y: float) -> Optional[str]:
         """
         Get the name of the zone containing this point.
 
-        Checks START zone first, then GATE2.
+        Checks zones in order: CONE1, CONE2, CONE3.
 
         Args:
             x: X-coordinate (pixels)
             y: Y-coordinate (pixels)
 
         Returns:
-            "START", "GATE2", or None if point is not in any zone
+            "CONE1", "CONE2", "CONE3", or None if point is not in any zone
         """
-        if self.start_zone.contains_point(x, y):
-            return "START"
-        if self.gate2_zone.contains_point(x, y):
-            return "GATE2"
+        if self.cone1_zone.contains_point(x, y):
+            return "CONE1"
+        if self.cone2_zone.contains_point(x, y):
+            return "CONE2"
+        if self.cone3_zone.contains_point(x, y):
+            return "CONE3"
         return None
 
     def is_in_turning_zone(self, x: float, y: float) -> bool:
@@ -261,34 +293,38 @@ class TurningZoneSet:
 
     def get_all_zones(self) -> List[TurningZone]:
         """Get list of all zones."""
-        return [self.start_zone, self.gate2_zone]
+        return [self.cone1_zone, self.cone2_zone, self.cone3_zone]
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON export."""
         return {
-            'start_zone': self.start_zone.to_dict(),
-            'gate2_zone': self.gate2_zone.to_dict(),
+            'cone1_zone': self.cone1_zone.to_dict(),
+            'cone2_zone': self.cone2_zone.to_dict(),
+            'cone3_zone': self.cone3_zone.to_dict(),
             'config': {
-                'start_zone_radius': self.config.start_zone_radius,
-                'gate2_zone_radius': self.config.gate2_zone_radius,
+                'cone1_zone_radius': self.config.cone1_zone_radius,
+                'cone2_zone_radius': self.config.cone2_zone_radius,
+                'cone3_zone_radius': self.config.cone3_zone_radius,
                 'stretch_x': self.config.stretch_x,
                 'stretch_y': self.config.stretch_y,
             },
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'TurningZoneSet':
+    def from_dict(cls, data: Dict[str, Any]) -> 'TripleConeZoneSet':
         """Create from dictionary (JSON deserialization)."""
         config_data = data.get('config', {})
-        config = TurningZoneConfig(
-            start_zone_radius=config_data.get('start_zone_radius', 150.0),
-            gate2_zone_radius=config_data.get('gate2_zone_radius', 180.0),
+        config = TripleConeZoneConfig(
+            cone1_zone_radius=config_data.get('cone1_zone_radius', 150.0),
+            cone2_zone_radius=config_data.get('cone2_zone_radius', 150.0),
+            cone3_zone_radius=config_data.get('cone3_zone_radius', 150.0),
             stretch_x=config_data.get('stretch_x', 1.0),
-            stretch_y=config_data.get('stretch_y', 1.3),
+            stretch_y=config_data.get('stretch_y', 5.0),
         )
         return cls(
-            start_zone=TurningZone.from_dict(data['start_zone']),
-            gate2_zone=TurningZone.from_dict(data['gate2_zone']),
+            cone1_zone=TurningZone.from_dict(data['cone1_zone']),
+            cone2_zone=TurningZone.from_dict(data['cone2_zone']),
+            cone3_zone=TurningZone.from_dict(data['cone3_zone']),
             config=config,
         )
 
@@ -297,68 +333,73 @@ class TurningZoneSet:
 # FACTORY FUNCTION
 # =============================================================================
 
-def create_turning_zones(
-    layout: 'Figure8Layout',
-    config: Optional[TurningZoneConfig] = None
-) -> TurningZoneSet:
+def create_triple_cone_zones(
+    cone1_pos: Tuple[float, float],
+    cone2_pos: Tuple[float, float],
+    cone3_pos: Tuple[float, float],
+    config: Optional[TripleConeZoneConfig] = None
+) -> TripleConeZoneSet:
     """
-    Factory function to create turning zones from a Figure8Layout.
+    Factory function to create turning zones for Triple Cone drill.
 
-    Creates two elliptical zones:
-    - START zone: Centered on start_cone position
-    - GATE2 zone: Centered on midpoint of gate2_left and gate2_right
+    Creates three elliptical zones, one at each cone:
+    - CONE1 zone: At LEFT/HOME cone (where player starts and returns)
+    - CONE2 zone: At CENTER cone
+    - CONE3 zone: At RIGHT cone
+
+    Triple cone drill pattern:
+    CONE1 → CONE2(turn) → CONE1(turn) → CONE3(turn) → CONE1(turn) → repeat
 
     The ellipse axes are determined by the base radius and stretch factors:
     - semi_major = radius * stretch_x (horizontal)
-    - semi_minor = radius * stretch_y (vertical, typically larger for tilted camera)
-
-    Example:
-        from f8_loss.detection import load_cone_annotations
-        from f8_loss.detection.turning_zones import create_turning_zones
-
-        layout = load_cone_annotations(parquet_dir)
-        zones = create_turning_zones(layout)
-
-        if zones.is_in_turning_zone(ball_x, ball_y):
-            print(f"Ball in zone: {zones.get_zone_at_point(ball_x, ball_y)}")
+    - semi_minor = radius / stretch_y (vertical, compressed for side-view camera)
 
     Args:
-        layout: Figure8Layout with cone positions from JSON annotations
-        config: TurningZoneConfig for radii and stretch factors (uses default if None)
+        cone1_pos: (x, y) pixel position of CONE1 (LEFT/HOME)
+        cone2_pos: (x, y) pixel position of CONE2 (CENTER)
+        cone3_pos: (x, y) pixel position of CONE3 (RIGHT)
+        config: TripleConeZoneConfig for radii and stretch factors (uses default if None)
 
     Returns:
-        TurningZoneSet containing START and GATE2 zones
+        TripleConeZoneSet containing CONE1, CONE2, and CONE3 zones
     """
     if config is None:
-        config = TurningZoneConfig.default()
+        config = TripleConeZoneConfig.default()
 
-    # START zone: centered on start cone
-    # Note: semi_major is the LARGER axis, semi_minor is the SMALLER axis
-    # For side-view camera: horizontal (X) should be larger, vertical (Y) compressed
-    # stretch_y > 1 means we COMPRESS vertical by dividing
-    start_zone = TurningZone(
-        name="START",
-        center_px=layout.start_cone.px,
-        center_py=layout.start_cone.py,
-        semi_major=config.start_zone_radius * config.stretch_x,  # Horizontal (wider)
-        semi_minor=config.start_zone_radius / config.stretch_y,  # Vertical (compressed)
-        rotation_deg=config.start_zone_rotation,
+    # CONE1 zone: HOME/LEFT cone
+    cone1_zone = TurningZone(
+        name="CONE1",
+        center_px=cone1_pos[0],
+        center_py=cone1_pos[1],
+        semi_major=config.cone1_zone_radius * config.stretch_x,  # Horizontal (wider)
+        semi_minor=config.cone1_zone_radius / config.stretch_y,  # Vertical (compressed)
+        rotation_deg=config.cone1_zone_rotation,
     )
 
-    # GATE2 zone: centered on gate2 midpoint
-    gate2_center = layout.gate2_center
-    gate2_zone = TurningZone(
-        name="GATE2",
-        center_px=gate2_center[0],
-        center_py=gate2_center[1],
-        semi_major=config.gate2_zone_radius * config.stretch_x,  # Horizontal (wider)
-        semi_minor=config.gate2_zone_radius / config.stretch_y,  # Vertical (compressed)
-        rotation_deg=config.gate2_zone_rotation,
+    # CONE2 zone: CENTER cone
+    cone2_zone = TurningZone(
+        name="CONE2",
+        center_px=cone2_pos[0],
+        center_py=cone2_pos[1],
+        semi_major=config.cone2_zone_radius * config.stretch_x,
+        semi_minor=config.cone2_zone_radius / config.stretch_y,
+        rotation_deg=config.cone2_zone_rotation,
     )
 
-    return TurningZoneSet(
-        start_zone=start_zone,
-        gate2_zone=gate2_zone,
+    # CONE3 zone: RIGHT cone
+    cone3_zone = TurningZone(
+        name="CONE3",
+        center_px=cone3_pos[0],
+        center_py=cone3_pos[1],
+        semi_major=config.cone3_zone_radius * config.stretch_x,
+        semi_minor=config.cone3_zone_radius / config.stretch_y,
+        rotation_deg=config.cone3_zone_rotation,
+    )
+
+    return TripleConeZoneSet(
+        cone1_zone=cone1_zone,
+        cone2_zone=cone2_zone,
+        cone3_zone=cone3_zone,
         config=config,
     )
 
@@ -368,15 +409,18 @@ def create_turning_zones(
 # =============================================================================
 
 # Default colors (BGR format for OpenCV)
-START_ZONE_COLOR = (200, 200, 0)      # Teal/Cyan
-GATE2_ZONE_COLOR = (200, 100, 200)    # Purple/Magenta
 ZONE_HIGHLIGHT_COLOR = (0, 255, 255)  # Bright Yellow
+
+# Triple Cone zone colors
+CONE1_ZONE_COLOR = (200, 200, 0)      # Teal/Cyan (HOME)
+CONE2_ZONE_COLOR = (200, 100, 200)    # Purple/Magenta (CENTER)
+CONE3_ZONE_COLOR = (100, 200, 200)    # Orange/Yellow (RIGHT)
 
 
 def draw_turning_zone(
     frame: np.ndarray,
     zone: TurningZone,
-    color: Tuple[int, int, int] = START_ZONE_COLOR,
+    color: Tuple[int, int, int] = CONE1_ZONE_COLOR,
     alpha: float = 0.25,
     x_offset: int = 0,
     highlight: bool = False,
@@ -426,31 +470,33 @@ def draw_turning_zone(
     cv2.ellipse(frame, center, axes, angle, 0, 360, draw_color, border_thickness)
 
 
-def draw_turning_zones(
+def draw_triple_cone_zones(
     frame: np.ndarray,
-    zones: TurningZoneSet,
+    zones: TripleConeZoneSet,
     ball_position: Optional[Tuple[float, float]],
     x_offset: int = 0,
-    start_color: Tuple[int, int, int] = START_ZONE_COLOR,
-    gate2_color: Tuple[int, int, int] = GATE2_ZONE_COLOR,
+    cone1_color: Tuple[int, int, int] = CONE1_ZONE_COLOR,
+    cone2_color: Tuple[int, int, int] = CONE2_ZONE_COLOR,
+    cone3_color: Tuple[int, int, int] = CONE3_ZONE_COLOR,
     highlight_color: Tuple[int, int, int] = ZONE_HIGHLIGHT_COLOR,
     alpha: float = 0.25,
 ) -> Optional[str]:
     """
-    Draw both turning zones with ball-in-zone highlighting.
+    Draw all three triple cone turning zones with ball-in-zone highlighting.
 
     Args:
         frame: Video frame to draw on
-        zones: TurningZoneSet containing both zones
+        zones: TripleConeZoneSet containing all three zones
         ball_position: (x, y) of ball center, or None if not detected
         x_offset: Sidebar offset
-        start_color: Color for START zone
-        gate2_color: Color for GATE2 zone
+        cone1_color: Color for CONE1 (HOME/LEFT) zone
+        cone2_color: Color for CONE2 (CENTER) zone
+        cone3_color: Color for CONE3 (RIGHT) zone
         highlight_color: Color when ball is inside zone
         alpha: Base transparency
 
     Returns:
-        Name of zone containing ball ("START", "GATE2", or None)
+        Name of zone containing ball ("CONE1", "CONE2", "CONE3", or None)
     """
     if not HAS_CV2:
         return None
@@ -460,25 +506,36 @@ def draw_turning_zones(
     if ball_position is not None:
         active_zone = zones.get_zone_at_point(ball_position[0], ball_position[1])
 
-    # Draw START zone
+    # Draw CONE1 zone (HOME/LEFT)
     draw_turning_zone(
         frame,
-        zones.start_zone,
-        color=start_color,
+        zones.cone1_zone,
+        color=cone1_color,
         alpha=alpha,
         x_offset=x_offset,
-        highlight=(active_zone == "START"),
+        highlight=(active_zone == "CONE1"),
         highlight_color=highlight_color,
     )
 
-    # Draw GATE2 zone
+    # Draw CONE2 zone (CENTER)
     draw_turning_zone(
         frame,
-        zones.gate2_zone,
-        color=gate2_color,
+        zones.cone2_zone,
+        color=cone2_color,
         alpha=alpha,
         x_offset=x_offset,
-        highlight=(active_zone == "GATE2"),
+        highlight=(active_zone == "CONE2"),
+        highlight_color=highlight_color,
+    )
+
+    # Draw CONE3 zone (RIGHT)
+    draw_turning_zone(
+        frame,
+        zones.cone3_zone,
+        color=cone3_color,
+        alpha=alpha,
+        x_offset=x_offset,
+        highlight=(active_zone == "CONE3"),
         highlight_color=highlight_color,
     )
 

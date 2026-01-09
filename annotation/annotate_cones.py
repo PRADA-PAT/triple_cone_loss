@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Manual Cone Annotation CLI for Figure-8 Drills.
+Manual Cone Annotation CLI for Triple Cone Drills.
 
 Annotate single player:
     python annotate_cones.py abdullah_nasib
@@ -24,38 +24,38 @@ from cone_annotator import ConeAnnotator, get_annotation_status
 # CONFIGURATION - Same as run_detection.py
 # ============================================================
 
-VIDEO_DIR = Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/f8_loss/videos")
-PARQUET_BASE = Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/f8_loss/video_detection_pose_ball_cones")
+VIDEO_DIR = Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/triple_cone_loss/videos")
+PARQUET_BASE = Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/triple_cone_loss/video_detection_pose_ball_cones")
 
 PLAYERS = {
-    "abdullah_nasib": "abdullah_nasib_f8.MOV",
-    "ali_buraq": "ali_buraq_f8.MOV",
-    "archie_post": "archie_post_f8.MOV",
-    "arjun_mital": "arjun_mital_f8.MOV",
-    "arsen_said": "arsen_said_f8.MOV",
-    "ava_peklar": "ava_peklar_f8.MOV",
-    "cayden_kuforji": "cayden_kuforji_f8.MOV",
-    "dameil_mendez": "dameil_mendez_f8.MOV",
-    "dylan_white": "dylan_white_f8.MOV",
-    "frederic_charbel": "frederic_charbel_f8.MOV",
-    "haeley_anzaldo": "haeley_anzaldo_f8.MOV",
-    "ismaail_ahmend": "ismaail_ahmend_f8.MOV",
-    "lucas_correvon": "lucas_correvon_f8.MOV",
-    "marwan_elazzouzi": "marwan_elazzouzi_f8.MOV",
+    "abdullah_nasib": "abdullah_nasib_tc.MOV",
+    "ali_buraq": "ali_buraq_tc.MOV",
+    "archie_post": "archie_post_tc.MOV",
+    "arjun_mital": "arjun_mital_tc.MOV",
+    "arsen_said": "arsen_said_tc.MOV",
+    "ava_peklar": "ava_peklar_tc.MOV",
+    "cayden_kuforji": "cayden_kuforji_tc.MOV",
+    "dameil_mendez": "dameil_mendez_tc.MOV",
+    "dylan_white": "dylan_white_tc.MOV",
+    "frederic_charbel": "frederic_charbel_tc.MOV",
+    "haeley_anzaldo": "haeley_anzaldo_tc.MOV",
+    "ismaail_ahmend": "ismaail_ahmend_tc.MOV",
+    "lucas_correvon": "lucas_correvon_tc.MOV",
+    "marwan_elazzouzi": "marwan_elazzouzi_tc.MOV",
     "maximillian_hall": "maximillian_hall.MOV",
-    "maxwell_ross": "maxwell_ross_f8.MOV",
-    "mike_basmadijan": "mike_basmadijan_f8.MOV",
-    "miles_logon": "miles_logon_f8.MOV",
-    "naomi_item": "naomi_item_f8.MOV",
-    "noah_whyte": "noah_whyte_f8.MOV",
+    "maxwell_ross": "maxwell_ross_tc.MOV",
+    "mike_basmadijan": "mike_basmadijan_tc.MOV",
+    "miles_logon": "miles_logon_tc.MOV",
+    "naomi_item": "naomi_item_tc.MOV",
+    "noah_whyte": "noah_whyte_tc.MOV",
     "oliver_walsh": "oliver_walsh.MOV",
-    "ollie_keefe": "ollie_keefe_f8.MOV",
-    "omar_tariqu": "omar_tariqu_f8.MOV",
-    "oscar_turner": "oscar_turner_f8.MOV",
+    "ollie_keefe": "ollie_keefe_tc.MOV",
+    "omar_tariqu": "omar_tariqu_tc.MOV",
+    "oscar_turner": "oscar_turner_tc.MOV",
     "poppy_henwoof": "poppy_henwoof.MOV",
     "riley_clemence": "riley_clemence.MOV",
-    "shayne_saldanha": "shayne_saldanha_f8.MOV",
-    "sonny_spicer": "sonny_spicer_f8.MOV",
+    "shayne_saldanha": "shayne_saldanha_tc.MOV",
+    "sonny_spicer": "sonny_spicer_tc.MOV",
 }
 
 
@@ -99,11 +99,11 @@ def show_status():
 
 
 def get_parquet_dir(player_name: str) -> Path:
-    """Get the parquet directory for a player (handles _f8 suffix)."""
-    # Try with _f8 suffix first
-    dir_f8 = PARQUET_BASE / f"{player_name}_f8"
-    if dir_f8.exists():
-        return dir_f8
+    """Get the parquet directory for a player (handles _tc suffix)."""
+    # Try with _tc suffix first
+    dir_tc = PARQUET_BASE / f"{player_name}"
+    if dir_tc.exists():
+        return dir_tc
     # Fall back to without suffix
     return PARQUET_BASE / player_name
 
@@ -202,7 +202,7 @@ def annotate_all():
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Manual cone annotation for Figure-8 drills",
+        description="Manual cone annotation for Triple Cone drills",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )

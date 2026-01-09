@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Video Annotation with JSON Cone Annotations for F8 Drill Analysis.
+Video Annotation with JSON Cone Annotations for Triple Cone Drill Analysis.
 
 Creates annotated videos using:
 - STATIC cone positions from JSON annotations (same position every frame)
@@ -11,7 +11,7 @@ Creates annotated videos using:
 This provides a stable drill layout reference while showing player/ball movement.
 
 Usage:
-    python annotate_with_json_cones.py abdullah_nasib_f8
+    python annotate_with_json_cones.py abdullah_nasib_tc
     python annotate_with_json_cones.py --list
     python annotate_with_json_cones.py --all
 """
@@ -217,8 +217,8 @@ class ConeAnnotation:
 
 
 @dataclass
-class Figure8Layout:
-    """Complete Figure-8 layout from JSON."""
+class DrillLayout:
+    """Complete Triple Cone layout from JSON."""
     start: ConeAnnotation
     gate1_left: ConeAnnotation
     gate1_right: ConeAnnotation
@@ -226,7 +226,7 @@ class Figure8Layout:
     gate2_right: ConeAnnotation
 
     @classmethod
-    def from_json(cls, json_path: Path) -> 'Figure8Layout':
+    def from_json(cls, json_path: Path) -> 'DrillLayout':
         """Load from JSON file."""
         with open(json_path, 'r') as f:
             data = json.load(f)
@@ -346,7 +346,7 @@ def draw_sidebar_row(frame: np.ndarray, y: int, label: str,
     return y + config.SIDEBAR_LINE_HEIGHT
 
 
-def draw_sidebar(frame: np.ndarray, frame_id: int, layout: Figure8Layout,
+def draw_sidebar(frame: np.ndarray, frame_id: int, layout: DrillLayout,
                  ball_center: Optional[Tuple[float, float]],
                  pose_keypoints: Dict[str, Tuple[float, float, float]],
                  config: AnnotationConfig,
@@ -359,7 +359,7 @@ def draw_sidebar(frame: np.ndarray, frame_id: int, layout: Figure8Layout,
     Args:
         frame: The full canvas (sidebar + video)
         frame_id: Current frame number
-        layout: Figure8 cone layout
+        layout: Triple Cone layout
         ball_center: (x, y) of ball center or None if not detected
         pose_keypoints: Dict of keypoint_name -> (x, y, confidence)
         config: Annotation configuration
@@ -602,7 +602,7 @@ def draw_gate_line(frame: np.ndarray, p1: Tuple[float, float], p2: Tuple[float, 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
 
-def draw_json_cones(frame: np.ndarray, layout: Figure8Layout, config: AnnotationConfig,
+def draw_json_cones(frame: np.ndarray, layout: DrillLayout, config: AnnotationConfig,
                     x_offset: int = 0) -> None:
     """Draw all JSON-annotated cones with gate lines."""
     # Draw Start cone
@@ -784,7 +784,7 @@ def determine_ball_position_relative_to_player(
     - "BEHIND" = ball is opposite to player's movement direction
     - "ALIGNED" = ball is directly at player's hip X position (within threshold)
 
-    For Figure-8 drill (horizontal movement):
+    For Triple Cone drill (horizontal movement):
     - Player moving LEFT (toward Gate 2): FRONT = ball to left of hip
     - Player moving RIGHT (toward Start): FRONT = ball to right of hip
 
@@ -1167,7 +1167,7 @@ def annotate_video_with_json_cones(video_path: Path, parquet_dir: Path, output_p
         return False
 
     print(f"  Loading JSON cone annotations...")
-    layout = Figure8Layout.from_json(json_path)
+    layout = DrillLayout.from_json(json_path)
     print(f"    Gate 1 width: {layout.gate1_width:.0f}px")
     print(f"    Gate 2 width: {layout.gate2_width:.0f}px")
 
@@ -1248,14 +1248,27 @@ def annotate_video_with_json_cones(video_path: Path, parquet_dir: Path, output_p
     edge_last_side: str = "NONE"             # Which edge (LEFT/RIGHT)
     edge_persist_frames = int(config.EDGE_COUNTER_PERSIST_SECONDS * fps)
 
-    # Drill event tracker - detects cone crossings at START cone
+    # Drill event tracker - detects cone crossings at START cone and gates
     # Pass bbox y2 (bottom edge) for accurate above/below threshold
+    # Gate lines are defined as ((left_x, left_y), (right_x, right_y))
+    gate1_line = (
+        (layout.gate1_left.px, layout.gate1_left.py),
+        (layout.gate1_right.px, layout.gate1_right.py)
+    )
+    gate2_line = (
+        (layout.gate2_left.px, layout.gate2_left.py),
+        (layout.gate2_right.px, layout.gate2_right.py)
+    )
     drill_tracker = DrillEventTracker(
         start_cone_x=layout.start.px,
         start_cone_y=layout.start.py,
-        start_cone_y2=layout.start.y2  # Bottom edge of cone bbox
+        start_cone_y2=layout.start.y2,  # Bottom edge of cone bbox
+        gate1_line=gate1_line,
+        gate2_line=gate2_line
     )
     print(f"  Drill tracker initialized at START cone ({layout.start.px}, {layout.start.py}), y2_threshold={layout.start.y2}")
+    print(f"  Gate 1 line: {gate1_line}")
+    print(f"  Gate 2 line: {gate2_line}")
 
     for frame_id in tqdm(range(total_frames), desc="  Annotating", unit="frame"):
         ret, video_frame = cap.read()
@@ -1564,12 +1577,12 @@ def get_available_videos(videos_dir: Path, parquet_dir: Path) -> List[Tuple[str,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Annotate F8 drill videos with JSON cone annotations and coordinate sidebar"
+        description="Annotate Triple Cone drill videos with JSON cone annotations and coordinate sidebar"
     )
     parser.add_argument(
         "video_name",
         nargs="?",
-        help="Name of video to process (e.g., abdullah_nasib_f8)"
+        help="Name of video to process (e.g., abdullah_nasib_tc)"
     )
     parser.add_argument(
         "--list", "-l",
@@ -1589,13 +1602,13 @@ def main():
     parser.add_argument(
         "--videos-dir",
         type=Path,
-        default=Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/f8_loss/videos"),
+        default=Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/triple_cone_loss/videos"),
         help="Directory containing source videos"
     )
     parser.add_argument(
         "--parquet-dir",
         type=Path,
-        default=Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/f8_loss/video_detection_pose_ball_cones"),
+        default=Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/triple_cone_loss/video_detection_pose_ball_cones"),
         help="Directory containing parquet data folders"
     )
 

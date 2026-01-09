@@ -8,11 +8,11 @@ import pandas as pd
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from f8_loss.main import main
-from f8_loss.annotation.drill_visualizer import DrillVisualizer
-from f8_loss.detection.config import VisualizationConfig
-from f8_loss import detect_ball_control, load_parquet_data
-from f8_loss.detection.data_structures import DetectionResult, FrameData, ControlState
+from triple_cone_loss.main import main
+from triple_cone_loss.annotation.drill_visualizer import DrillVisualizer
+from triple_cone_loss.detection.config import VisualizationConfig
+from triple_cone_loss import detect_ball_control, load_parquet_data
+from triple_cone_loss.detection.data_structures import DetectionResult, FrameData, ControlState
 
 # Real data paths
 DATA_DIR = Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/7 Cone_output/Drill_1_7 Cone_dubaiacademy_Alex Mochar")
@@ -200,9 +200,9 @@ class TestModuleExecution:
     @pytest.mark.skipif(not all(p.exists() for p in [CONE_PATH, BALL_PATH, POSE_PATH]),
                         reason="Real data not available")
     def test_run_as_module(self, tmp_path):
-        """Test running with python -m f8_loss.main."""
+        """Test running with python -m triple_cone_loss.main."""
         result = subprocess.run([
-            sys.executable, '-m', 'f8_loss.main',
+            sys.executable, '-m', 'triple_cone_loss.main',
             '--ball', str(BALL_PATH),
             '--pose', str(POSE_PATH),
             '--cone', str(CONE_PATH),

@@ -8,169 +8,14 @@ Defines all data models for detection results including:
 - LossEvent: A detected loss-of-control event
 - DetectionResult: Complete detection output
 
-Figure-8 specific structures:
-- DrillPhase: Current phase in Figure-8 drill
-- GatePassage: Record of passing through a gate
+Triple Cone (3-cone) structures:
+- TripleConeDrillPhase: Current phase in drill (AT_CONE1, AT_CONE2, AT_CONE3, etc.)
+- TripleConeLayout: 3-cone positions (CONE1/HOME, CONE2/CENTER, CONE3/RIGHT)
 - DrillDirection: Direction of travel (forward/backward)
-- ConeAnnotation: Single cone from JSON annotation
-- Figure8Layout: Complete drill layout with gate definitions
 """
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
-
-
-# =============================================================================
-# CONE ANNOTATION STRUCTURES (from JSON)
-# =============================================================================
-
-@dataclass
-class ConeAnnotation:
-    """
-    Single cone from JSON annotation file.
-
-    Attributes:
-        role: Cone role ("start", "gate1_left", "gate1_right", "gate2_left", "gate2_right")
-        px: Pixel x-coordinate (horizontal position in video frame)
-        py: Pixel y-coordinate (vertical position in video frame)
-        bbox: Optional bounding box dict with x1, y1, x2, y2
-    """
-    role: str
-    px: float
-    py: float
-    bbox: Optional[Dict[str, int]] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            'role': self.role,
-            'px': self.px,
-            'py': self.py,
-            'bbox': self.bbox,
-        }
-
-    @classmethod
-    def from_json(cls, role: str, data: dict) -> 'ConeAnnotation':
-        """Create from JSON annotation data."""
-        return cls(
-            role=role,
-            px=data['px'],
-            py=data['py'],
-            bbox=data.get('bbox'),
-        )
-
-
-@dataclass
-class Figure8Layout:
-    """
-    Complete Figure-8 drill layout from JSON annotations.
-
-    Provides gate line definitions for passage detection using pixel coordinates.
-
-    Layout (pixel x increases left to right):
-    [G2_LEFT] [G2_RIGHT] ---- [G1_LEFT] [G1_RIGHT] ---- [START]
-
-    Forward direction: Start → G1 → G2 (decreasing px)
-    Backward direction: G2 → G1 → Start (increasing px)
-    """
-    start_cone: ConeAnnotation
-    gate1_left: ConeAnnotation
-    gate1_right: ConeAnnotation
-    gate2_left: ConeAnnotation
-    gate2_right: ConeAnnotation
-    video_name: Optional[str] = None
-    annotated_at: Optional[str] = None
-
-    @property
-    def gate1_line(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-        """Gate 1 line segment as ((x1, y1), (x2, y2)) in pixel coords."""
-        return (
-            (self.gate1_left.px, self.gate1_left.py),
-            (self.gate1_right.px, self.gate1_right.py)
-        )
-
-    @property
-    def gate2_line(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-        """Gate 2 line segment as ((x1, y1), (x2, y2)) in pixel coords."""
-        return (
-            (self.gate2_left.px, self.gate2_left.py),
-            (self.gate2_right.px, self.gate2_right.py)
-        )
-
-    @property
-    def gate1_center(self) -> Tuple[float, float]:
-        """Center point of Gate 1 in pixel coords."""
-        return (
-            (self.gate1_left.px + self.gate1_right.px) / 2,
-            (self.gate1_left.py + self.gate1_right.py) / 2
-        )
-
-    @property
-    def gate2_center(self) -> Tuple[float, float]:
-        """Center point of Gate 2 in pixel coords."""
-        return (
-            (self.gate2_left.px + self.gate2_right.px) / 2,
-            (self.gate2_left.py + self.gate2_right.py) / 2
-        )
-
-    @property
-    def start_position(self) -> Tuple[float, float]:
-        """Start cone position in pixel coords."""
-        return (self.start_cone.px, self.start_cone.py)
-
-    @property
-    def gate1_width(self) -> float:
-        """Width of Gate 1 in pixels."""
-        import math
-        return math.sqrt(
-            (self.gate1_right.px - self.gate1_left.px)**2 +
-            (self.gate1_right.py - self.gate1_left.py)**2
-        )
-
-    @property
-    def gate2_width(self) -> float:
-        """Width of Gate 2 in pixels."""
-        import math
-        return math.sqrt(
-            (self.gate2_right.px - self.gate2_left.px)**2 +
-            (self.gate2_right.py - self.gate2_left.py)**2
-        )
-
-    def get_all_cones(self) -> List[ConeAnnotation]:
-        """Get all cones as a list."""
-        return [
-            self.start_cone,
-            self.gate1_left,
-            self.gate1_right,
-            self.gate2_left,
-            self.gate2_right,
-        ]
-
-    def to_cone_roles(self) -> List['ConeRole']:
-        """Convert to list of ConeRole objects for export."""
-        roles = []
-        for cone in self.get_all_cones():
-            roles.append(ConeRole(
-                cone_id=-1,  # No ID from JSON, use -1
-                role=cone.role,
-                field_x=cone.px,  # Using pixel coords
-                field_y=cone.py,
-            ))
-        return roles
-
-    @classmethod
-    def from_json(cls, data: dict) -> 'Figure8Layout':
-        """Create from parsed JSON annotation file."""
-        cones = data['cones']
-        return cls(
-            start_cone=ConeAnnotation.from_json('start', cones['start']),
-            gate1_left=ConeAnnotation.from_json('gate1_left', cones['gate1_left']),
-            gate1_right=ConeAnnotation.from_json('gate1_right', cones['gate1_right']),
-            gate2_left=ConeAnnotation.from_json('gate2_left', cones['gate2_left']),
-            gate2_right=ConeAnnotation.from_json('gate2_right', cones['gate2_right']),
-            video_name=data.get('video'),
-            annotated_at=data.get('annotated_at'),
-        )
 
 
 # =============================================================================
@@ -195,76 +40,152 @@ class EventType(Enum):
     RECOVERY = "recovery"
     BOUNDARY_VIOLATION = "boundary"
     BALL_BEHIND_PLAYER = "ball_behind"  # Ball stays behind player relative to movement
-
-
-class DrillPhase(Enum):
-    """
-    Current phase in Figure-8 drill.
-
-    Drill pattern: START → G1 → G2 → TURN → G2 → G1 → (repeat)
-    """
-    AT_START = "at_start"              # Near start cone, ready to begin
-    APPROACHING_G1 = "approaching_g1"  # Moving toward Gate 1
-    PASSING_G1 = "passing_g1"          # Currently passing through Gate 1
-    BETWEEN_GATES = "between_gates"    # Between G1 and G2
-    APPROACHING_G2 = "approaching_g2"  # Moving toward Gate 2
-    PASSING_G2 = "passing_g2"          # Currently passing through Gate 2
-    AT_TURN = "at_turn"                # Beyond G2, turning around
-    RETURNING = "returning"            # On return journey
-    COMPLETED = "completed"            # Drill finished
+    BALL_BEHIND_INTENTION = "ball_behind_intention"  # Ball behind relative to facing direction
 
 
 class DrillDirection(Enum):
     """Direction of travel in drill."""
-    FORWARD = "forward"    # Start → G2 direction
-    BACKWARD = "backward"  # G2 → Start direction
+    FORWARD = "forward"    # CONE1 → CONE2/CONE3 direction (increasing X)
+    BACKWARD = "backward"  # Returning to CONE1 (decreasing X)
     STATIONARY = "stationary"
 
 
-@dataclass
-class GatePassage:
-    """Record of a gate passage event."""
-    gate_id: str           # "G1" or "G2"
-    direction: DrillDirection
-    frame_id: int
-    timestamp: float
-    ball_position: Tuple[float, float]
-    player_position: Tuple[float, float]
-    ball_controlled: bool  # Was ball under control during passage
-    passage_quality: float # 0-1 score for how cleanly they passed through
+# =============================================================================
+# TRIPLE CONE DRILL STRUCTURES (3-CONE)
+# =============================================================================
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            'gate_id': self.gate_id,
-            'direction': self.direction.value,
-            'frame_id': self.frame_id,
-            'timestamp': self.timestamp,
-            'ball_x': self.ball_position[0],
-            'ball_y': self.ball_position[1],
-            'player_x': self.player_position[0],
-            'player_y': self.player_position[1],
-            'ball_controlled': self.ball_controlled,
-            'passage_quality': self.passage_quality,
-        }
+class TripleConeDrillPhase(Enum):
+    """
+    Current phase in Triple Cone drill.
+
+    Drill pattern (one repetition):
+    CONE1 → CONE2(turn) → CONE1(turn) → CONE3(turn) → CONE1(turn) → repeat
+
+    Cone layout:
+    [CONE1/LEFT/HOME] ---- [CONE2/CENTER] ---- [CONE3/RIGHT]
+    """
+    AT_CONE1 = "at_cone1"                       # At home cone (LEFT)
+    GOING_TO_CONE2 = "going_to_cone2"           # Moving toward center cone
+    AT_CONE2 = "at_cone2"                       # At center cone, turning
+    RETURNING_FROM_CONE2 = "returning_from_cone2"  # Returning to home from center
+    GOING_TO_CONE3 = "going_to_cone3"           # Moving toward right cone
+    AT_CONE3 = "at_cone3"                       # At right cone, turning
+    RETURNING_FROM_CONE3 = "returning_from_cone3"  # Returning to home from right
+    COMPLETED = "completed"                     # Drill finished
+    UNKNOWN = "unknown"                         # Phase not determined
 
 
 @dataclass
-class ConeRole:
-    """Cone role assignment in Figure-8 drill."""
-    cone_id: int
-    role: str  # "start", "gate1_left", "gate1_right", "gate2_left", "gate2_right"
-    field_x: float
-    field_y: float
+class TripleConeLayout:
+    """
+    Triple Cone drill layout with 3 cones in a horizontal line.
+
+    Layout (pixel x increases left to right):
+    [CONE1/LEFT/HOME] ---- [CONE2/CENTER] ---- [CONE3/RIGHT]
+
+    Cone positions are extracted from parquet data (mean positions across frames).
+
+    Attributes:
+        cone1: Left/HOME cone position (where player starts and returns)
+        cone2: Center cone position
+        cone3: Right cone position
+    """
+    cone1: Tuple[float, float]  # (px, py) - LEFT/HOME
+    cone2: Tuple[float, float]  # (px, py) - CENTER
+    cone3: Tuple[float, float]  # (px, py) - RIGHT
+
+    @property
+    def cone1_x(self) -> float:
+        """X position of CONE1 (HOME/LEFT)."""
+        return self.cone1[0]
+
+    @property
+    def cone1_y(self) -> float:
+        """Y position of CONE1 (HOME/LEFT)."""
+        return self.cone1[1]
+
+    @property
+    def cone2_x(self) -> float:
+        """X position of CONE2 (CENTER)."""
+        return self.cone2[0]
+
+    @property
+    def cone2_y(self) -> float:
+        """Y position of CONE2 (CENTER)."""
+        return self.cone2[1]
+
+    @property
+    def cone3_x(self) -> float:
+        """X position of CONE3 (RIGHT)."""
+        return self.cone3[0]
+
+    @property
+    def cone3_y(self) -> float:
+        """Y position of CONE3 (RIGHT)."""
+        return self.cone3[1]
+
+    @property
+    def cone1_to_cone2_distance(self) -> float:
+        """Distance from CONE1 to CONE2 in pixels."""
+        import math
+        return math.sqrt(
+            (self.cone2[0] - self.cone1[0])**2 +
+            (self.cone2[1] - self.cone1[1])**2
+        )
+
+    @property
+    def cone2_to_cone3_distance(self) -> float:
+        """Distance from CONE2 to CONE3 in pixels."""
+        import math
+        return math.sqrt(
+            (self.cone3[0] - self.cone2[0])**2 +
+            (self.cone3[1] - self.cone2[1])**2
+        )
+
+    @property
+    def total_span(self) -> float:
+        """Total horizontal span from CONE1 to CONE3 in pixels."""
+        import math
+        return math.sqrt(
+            (self.cone3[0] - self.cone1[0])**2 +
+            (self.cone3[1] - self.cone1[1])**2
+        )
 
     def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON export."""
         return {
-            'cone_id': self.cone_id,
-            'role': self.role,
-            'field_x': self.field_x,
-            'field_y': self.field_y,
+            'cone1': {'px': self.cone1[0], 'py': self.cone1[1]},
+            'cone2': {'px': self.cone2[0], 'py': self.cone2[1]},
+            'cone3': {'px': self.cone3[0], 'py': self.cone3[1]},
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'TripleConeLayout':
+        """Create from dictionary."""
+        return cls(
+            cone1=(data['cone1']['px'], data['cone1']['py']),
+            cone2=(data['cone2']['px'], data['cone2']['py']),
+            cone3=(data['cone3']['px'], data['cone3']['py']),
+        )
+
+    @classmethod
+    def from_mean_positions(
+        cls,
+        cone1_x: float, cone1_y: float,
+        cone2_x: float, cone2_y: float,
+        cone3_x: float, cone3_y: float
+    ) -> 'TripleConeLayout':
+        """Create from mean cone positions (from parquet analysis)."""
+        return cls(
+            cone1=(cone1_x, cone1_y),
+            cone2=(cone2_x, cone2_y),
+            cone3=(cone3_x, cone3_y),
+        )
+
+
+# =============================================================================
+# FRAME AND EVENT STRUCTURES
+# =============================================================================
 
 @dataclass
 class FrameData:
@@ -287,19 +208,19 @@ class FrameData:
     closest_ankle: str  # "left_ankle" or "right_ankle"
 
     # Context
-    nearest_cone_id: int
+    nearest_cone_id: int  # 1, 2, or 3 for CONE1, CONE2, CONE3
     nearest_cone_distance: float
-    current_gate: Optional[str]
+    current_gate: Optional[str]  # Legacy field, always None in 3-cone mode
 
     # Computed metrics
     ball_ankle_distance: float
     control_score: float
     control_state: ControlState
 
-    # Figure-8 specific fields (optional, None for 7-cone drill)
-    drill_phase: Optional[DrillPhase] = None
+    # Triple Cone specific fields
+    drill_phase: Optional[TripleConeDrillPhase] = None
     drill_direction: Optional[DrillDirection] = None
-    lap_count: int = 0  # Number of completed laps
+    lap_count: int = 0  # Number of completed reps
 
     # Hip position (for ball-behind detection)
     hip_x: Optional[float] = None  # Hip pixel X coordinate
@@ -308,10 +229,17 @@ class FrameData:
     # Ball position relative to player (for ball-behind detection)
     player_movement_direction: Optional[str] = None  # "LEFT", "RIGHT", or None
     ball_behind_player: Optional[bool] = None  # True if ball is behind player
-    in_turning_zone: Optional[str] = None  # "START", "GATE2", or None
+    in_turning_zone: Optional[str] = None  # "CONE1"/"CONE2"/"CONE3" or None
 
     # Ball tracking quality (for filtering false positives)
-    ball_interpolated: bool = False  # True if ball position is interpolated (not real detection)
+    ball_interpolated: bool = False  # True if ball position is interpolated
+
+    # Intention-based (face direction) ball position detection
+    nose_x: Optional[float] = None  # Nose pixel X coordinate
+    nose_y: Optional[float] = None  # Nose pixel Y coordinate
+    player_facing_direction: Optional[str] = None  # "LEFT", "RIGHT", or None (from nose-hip)
+    ball_behind_intention: Optional[bool] = None   # True if ball is behind facing direction
+    ball_intention_position: Optional[str] = None  # "I-FRONT", "I-BEHIND", "I-ALIGNED"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for DataFrame."""
@@ -335,7 +263,7 @@ class FrameData:
             'control_score': self.control_score,
             'control_state': self.control_state.value,
         }
-        # Add Figure-8 specific fields if present
+        # Add Triple Cone specific fields if present
         if self.drill_phase is not None:
             result['drill_phase'] = self.drill_phase.value
         if self.drill_direction is not None:
@@ -353,6 +281,18 @@ class FrameData:
             result['ball_behind_player'] = self.ball_behind_player
         if self.in_turning_zone is not None:
             result['in_turning_zone'] = self.in_turning_zone
+
+        # Add intention-based fields if present
+        if self.nose_x is not None:
+            result['nose_x'] = self.nose_x
+        if self.nose_y is not None:
+            result['nose_y'] = self.nose_y
+        if self.player_facing_direction is not None:
+            result['player_facing_direction'] = self.player_facing_direction
+        if self.ball_behind_intention is not None:
+            result['ball_behind_intention'] = self.ball_behind_intention
+        if self.ball_intention_position is not None:
+            result['ball_intention_position'] = self.ball_intention_position
 
         return result
 
@@ -375,7 +315,7 @@ class LossEvent:
 
     # Context
     nearest_cone_id: int
-    gate_context: Optional[str]
+    gate_context: Optional[str]  # Legacy field, always None in 3-cone mode
 
     # Recovery
     recovered: bool = False
@@ -436,12 +376,8 @@ class DetectionResult:
 
     error: Optional[str] = None
 
-    # Figure-8 specific results (optional)
-    gate_passages: List[GatePassage] = field(default_factory=list)
-    cone_roles: List[ConeRole] = field(default_factory=list)
-    total_laps: int = 0
-    successful_passages: int = 0
-    failed_passages: int = 0  # Passages where ball was not controlled
+    # Triple Cone specific results
+    total_laps: int = 0  # Number of full repetitions (CONE1→CONE2→CONE1→CONE3→CONE1)
 
     def __post_init__(self):
         """Calculate summary statistics."""
@@ -452,8 +388,3 @@ class DetectionResult:
         if self.total_frames > 0:
             controlled = self.total_frames - self.total_loss_duration_frames
             self.control_percentage = (controlled / self.total_frames) * 100
-
-        # Calculate Figure-8 specific stats
-        if self.gate_passages:
-            self.successful_passages = sum(1 for p in self.gate_passages if p.ball_controlled)
-            self.failed_passages = len(self.gate_passages) - self.successful_passages

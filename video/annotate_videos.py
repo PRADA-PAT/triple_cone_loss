@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Video Annotation Script for F8 Drill Analysis
+Video Annotation Script for Triple Cone Drill Analysis
 Overlays bounding boxes (ball, cones) and pose skeleton on videos.
 
 Usage:
     python annotate_videos.py                      # Process all videos
-    python annotate_videos.py abdullah_nasib_f8    # Process single video
+    python annotate_videos.py abdullah_nasib_tc    # Process single video
     python annotate_videos.py --list               # List available videos
 """
 
@@ -352,7 +352,7 @@ def get_available_videos(videos_dir: Path, parquet_dir: Path) -> List[Tuple[str,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Annotate F8 drill videos with bounding boxes and pose skeleton"
+        description="Annotate Triple Cone drill videos with bounding boxes and pose skeleton"
     )
     parser.add_argument(
         "video_name",
@@ -372,13 +372,13 @@ def main():
     parser.add_argument(
         "--videos-dir",
         type=Path,
-        default=Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/f8_loss/videos"),
+        default=Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/triple_cone_loss/videos"),
         help="Directory containing source videos"
     )
     parser.add_argument(
         "--parquet-dir",
         type=Path,
-        default=Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/f8_loss/video_detection_pose_ball_cones"),
+        default=Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/triple_cone_loss/video_detection_pose_ball_cones"),
         help="Directory containing parquet data folders"
     )
 

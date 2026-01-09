@@ -5,7 +5,8 @@ Handles loading parquet files, JSON cone annotations, and preprocessing for anal
 Only uses ankle keypoints (left_ankle, right_ankle) for stability.
 
 Key functions:
-- load_cone_annotations(): Load static cone positions from JSON
+- load_triple_cone_layout_from_parquet(): Load 3-cone positions from parquet
+- load_triple_cone_annotations(): Load 3-cone positions from JSON
 - load_parquet_data(): Load parquet files (ball, pose)
 - extract_ankle_positions(): Filter pose data to ankles only
 - get_closest_ankle_per_frame(): Find nearest ankle to ball per frame
@@ -25,15 +26,15 @@ try:
 except ImportError:
     HAS_OPENCV = False
 
-from .data_structures import Figure8Layout
+from .data_structures import TripleConeLayout
 
 logger = logging.getLogger(__name__)
 
 # Only use ankles for ball-foot distance (more stable than toes)
 ANKLE_KEYPOINTS = ['left_ankle', 'right_ankle']
 
-# Expected cone roles in JSON annotation
-EXPECTED_CONE_ROLES = ['start', 'gate1_left', 'gate1_right', 'gate2_left', 'gate2_right']
+# Expected cone roles for Triple Cone drill (3 cones)
+EXPECTED_CONE_ROLES = ['cone1', 'cone2', 'cone3']
 
 # Default FPS fallback when video cannot be read
 DEFAULT_FPS = 30.0
@@ -94,23 +95,87 @@ def get_video_fps(video_path: str, default_fps: float = DEFAULT_FPS) -> float:
 
 
 # =============================================================================
-# JSON CONE ANNOTATION LOADING
+# 3-CONE LAYOUT LOADING
 # =============================================================================
 
-def load_cone_annotations(json_path: str) -> Figure8Layout:
+def load_triple_cone_layout_from_parquet(cone_parquet_path: str) -> TripleConeLayout:
     """
-    Load cone positions and roles from JSON annotation file.
+    Load 3-cone positions from parquet file.
 
-    JSON format:
+    Cones are identified by their mean position across all frames,
+    then sorted by X position (left to right) to assign roles:
+    - CONE1 (leftmost): HOME cone where player starts
+    - CONE2 (center): First turning cone
+    - CONE3 (rightmost): Second turning cone
+
+    Args:
+        cone_parquet_path: Path to cone parquet file (*_cone.parquet)
+
+    Returns:
+        TripleConeLayout with cone1, cone2, cone3 positions
+
+    Raises:
+        FileNotFoundError: If parquet file doesn't exist
+        ValueError: If fewer than 3 cones detected
+    """
+    path = Path(cone_parquet_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Cone parquet file not found: {path}")
+
+    logger.info(f"Loading cone positions from parquet: {path.name}")
+
+    cone_df = pd.read_parquet(path)
+
+    if cone_df.empty:
+        raise ValueError(f"Cone parquet file is empty: {path}")
+
+    # Group by object_id and compute mean position across all frames
+    positions = []
+    for obj_id in sorted(cone_df['object_id'].unique()):
+        obj_data = cone_df[cone_df['object_id'] == obj_id]
+        mean_x = obj_data['center_x'].mean()
+        mean_y = obj_data['center_y'].mean()
+        positions.append((mean_x, mean_y))
+
+    # Sort by X position (left to right): CONE1, CONE2, CONE3
+    positions.sort(key=lambda p: p[0])
+
+    if len(positions) < 3:
+        raise ValueError(
+            f"Expected at least 3 cones in parquet, found {len(positions)}. "
+            f"Positions: {positions}"
+        )
+
+    # Take first 3 cones (in case there are extras)
+    cone1, cone2, cone3 = positions[:3]
+
+    layout = TripleConeLayout(
+        cone1=cone1,
+        cone2=cone2,
+        cone3=cone3,
+    )
+
+    logger.info(
+        f"Loaded Triple Cone layout from parquet: "
+        f"CONE1=({cone1[0]:.0f}, {cone1[1]:.0f}), "
+        f"CONE2=({cone2[0]:.0f}, {cone2[1]:.0f}), "
+        f"CONE3=({cone3[0]:.0f}, {cone3[1]:.0f})"
+    )
+
+    return layout
+
+
+def load_triple_cone_annotations(json_path: str) -> TripleConeLayout:
+    """
+    Load 3-cone positions from JSON annotation file (new format).
+
+    JSON format (new 3-cone):
     {
-        "video": "player_name_f8.MOV",
-        "annotated_at": "2025-12-19T12:10:52",
+        "video": "player_name_tc.MOV",
         "cones": {
-            "start": {"bbox": {...}, "px": 1593, "py": 878},
-            "gate1_left": {"bbox": {...}, "px": 906, "py": 869},
-            "gate1_right": {"bbox": {...}, "px": 1065, "py": 870},
-            "gate2_left": {"bbox": {...}, "px": 174, "py": 861},
-            "gate2_right": {"bbox": {...}, "px": 329, "py": 865}
+            "cone1": {"px": 174, "py": 861},
+            "cone2": {"px": 906, "py": 869},
+            "cone3": {"px": 1593, "py": 878}
         }
     }
 
@@ -118,7 +183,7 @@ def load_cone_annotations(json_path: str) -> Figure8Layout:
         json_path: Path to cone_annotations.json file
 
     Returns:
-        Figure8Layout with all cone positions and gate definitions
+        TripleConeLayout with cone positions
 
     Raises:
         FileNotFoundError: If JSON file doesn't exist
@@ -128,16 +193,17 @@ def load_cone_annotations(json_path: str) -> Figure8Layout:
     if not path.exists():
         raise FileNotFoundError(f"Cone annotation file not found: {path}")
 
-    logger.info(f"Loading cone annotations from {path.name}")
+    logger.info(f"Loading triple cone annotations from {path.name}")
 
     with open(path, 'r') as f:
         data = json.load(f)
 
-    # Validate required structure
     if 'cones' not in data:
         raise ValueError(f"Invalid JSON: missing 'cones' key in {path}")
 
     cones = data['cones']
+
+    # Check for new 3-cone format
     missing_roles = [role for role in EXPECTED_CONE_ROLES if role not in cones]
     if missing_roles:
         raise ValueError(
@@ -146,20 +212,25 @@ def load_cone_annotations(json_path: str) -> Figure8Layout:
         )
 
     # Validate each cone has required fields
-    for role, cone_data in cones.items():
+    for role in EXPECTED_CONE_ROLES:
+        cone_data = cones[role]
         if 'px' not in cone_data or 'py' not in cone_data:
             raise ValueError(
                 f"Invalid JSON: cone '{role}' missing 'px' or 'py' in {path}"
             )
 
-    # Create Figure8Layout from JSON
-    layout = Figure8Layout.from_json(data)
+    # Create TripleConeLayout
+    layout = TripleConeLayout(
+        cone1=(cones['cone1']['px'], cones['cone1']['py']),
+        cone2=(cones['cone2']['px'], cones['cone2']['py']),
+        cone3=(cones['cone3']['px'], cones['cone3']['py']),
+    )
 
     logger.info(
-        f"Loaded Figure-8 layout: "
-        f"G1 width={layout.gate1_width:.0f}px, "
-        f"G2 width={layout.gate2_width:.0f}px, "
-        f"Start at ({layout.start_cone.px:.0f}, {layout.start_cone.py:.0f})"
+        f"Loaded Triple Cone layout from JSON: "
+        f"CONE1=({layout.cone1_x:.0f}, {layout.cone1_y:.0f}), "
+        f"CONE2=({layout.cone2_x:.0f}, {layout.cone2_y:.0f}), "
+        f"CONE3=({layout.cone3_x:.0f}, {layout.cone3_y:.0f})"
     )
 
     return layout

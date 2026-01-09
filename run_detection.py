@@ -1,8 +1,8 @@
 """
-Figure-8 Drill Ball Control Detection - Starter Script
+Triple Cone Drill Ball Control Detection - Starter Script
 
 Run for a single player:
-    python run_detection.py abdullah_nasib
+    python run_detection.py alex_mochar
 
 Run for all players:
     python run_detection.py --all
@@ -12,27 +12,27 @@ List available players:
 
 Run validation tests (compare detection vs ground truth):
     python run_detection.py --test
-    python run_detection.py --test --tolerance 2.0  # Custom tolerance (default: 1.5s)
+    python run_detection.py --test --frame-tolerance 30  # Custom tolerance (default: 45 frames)
     OR set TEST_MODE = True in the config section
+
+Note: Frame tolerance is FPS-independent. Default 45 frames ≈ 1.5s at 30fps.
 """
 import sys
 from pathlib import Path
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from f8_loss import (
+# Use local detection module (self-contained package)
+from detection import (
     detect_ball_control,
     load_parquet_data,
     CSVExporter,
     AppConfig,
-    Figure8ConeDetector,
+    TripleConeConeDetector,
     get_video_fps,
 )
 
 # Optional visualization (requires OpenCV)
 try:
-    from f8_loss.annotation.drill_visualizer import DrillVisualizer
+    from annotation.drill_visualizer import DrillVisualizer
     HAS_VISUALIZER = True
 except ImportError:
     HAS_VISUALIZER = False
@@ -41,44 +41,44 @@ except ImportError:
 # CONFIGURATION - Edit these paths as needed
 # ============================================================
 
-# Base directories
-VIDEO_DIR = Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/f8_loss/videos")
+# Base directories (using local folders - self-contained)
+VIDEO_DIR = Path(__file__).parent / "videos"
 OUTPUT_BASE = Path(__file__).parent / "output"
 
-# Parquet data directory
-# Structure: PARQUET_BASE / {player_name}_f8 / {player_name}_f8_football.parquet, etc.
-PARQUET_BASE = Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/f8_loss/video_detection_pose_ball_cones")
+# Parquet data directory (local to this project)
+# Structure: PARQUET_BASE / {folder_name} / {folder_name}_football.parquet, etc.
+PARQUET_BASE = Path(__file__).parent / "video_detection_pose_ball_cones"
 
 # All available players with their video files
+# Triple Cone drill naming: "Drill_1_Triple cone Turn _dubaiacademy_{player_name}.MOV"
 PLAYERS = {
-    "abdullah_nasib": "abdullah_nasib_f8.MOV",
-    "ali_buraq": "ali_buraq_f8.MOV",
-    "archie_post": "archie_post_f8.MOV",
-    "arjun_mital": "arjun_mital_f8.MOV",
-    "arsen_said": "arsen_said_f8.MOV",
-    "ava_peklar": "ava_peklar_f8.MOV",
-    "cayden_kuforji": "cayden_kuforji_f8.MOV",
-    "dameil_mendez": "dameil_mendez_f8.MOV",
-    "dylan_white": "dylan_white_f8.MOV",
-    "frederic_charbel": "frederic_charbel_f8.MOV",
-    "haeley_anzaldo": "haeley_anzaldo_f8.MOV",
-    "ismaail_ahmend": "ismaail_ahmend_f8.MOV",
-    "lucas_correvon": "lucas_correvon_f8.MOV",
-    "marwan_elazzouzi": "marwan_elazzouzi_f8.MOV",
-    "maximillian_hall": "maximillian_hall.MOV",
-    "maxwell_ross": "maxwell_ross_f8.MOV",
-    "mike_basmadijan": "mike_basmadijan_f8.MOV",
-    "miles_logon": "miles_logon_f8.MOV",
-    "naomi_item": "naomi_item_f8.MOV",
-    "noah_whyte": "noah_whyte_f8.MOV",
-    "oliver_walsh": "oliver_walsh.MOV",
-    "ollie_keefe": "ollie_keefe_f8.MOV",
-    "omar_tariqu": "omar_tariqu_f8.MOV",
-    "oscar_turner": "oscar_turner_f8.MOV",
-    "poppy_henwoof": "poppy_henwoof.MOV",
-    "riley_clemence": "riley_clemence.MOV",
-    "shayne_saldanha": "shayne_saldanha_f8.MOV",
-    "sonny_spicer": "sonny_spicer_f8.MOV",
+    "alex_mochar": "Drill_1_Triple cone Turn _dubaiacademy_Alex mochar.MOV",
+    "alfie_bates": "Drill_1_Triple cone Turn _dubaiacademy_Alfie Bates.MOV",
+    "alonso_carrasco": "Drill_1_Triple cone Turn _dubaiacademy_Alonso Carrasco.MOV",
+    "antonio_rodini_attoh": "Drill_1_Triple cone Turn _dubaiacademy_Antonio Rodini Attoh.MOV",
+    "essa_ahmed": "Drill_1_Triple cone Turn _dubaiacademy_Essa Ahmed.MOV",
+    "freddie_keilering": "Drill_1_Triple cone Turn _dubaiacademy_Freddie Keilering.MOV",
+    "george_maclachlan": "Drill_1_Triple cone Turn _dubaiacademy_George Maclachlan.MOV",
+    "isaac_barlow": "Drill_1_Triple cone Turn _dubaiacademy_Isaac Barlow.MOV",
+    "jacobo_fernandez": "Drill_1_Triple cone Turn _dubaiacademy_Jacobo Fernandez.MOV",
+    "jonty_robbins": "Drill_1_Triple cone Turn _dubaiacademy_Jonty Robbins.MOV",
+    "kingston_robison": "Drill_1_Triple cone Turn _dubaiacademy_Kingston robison.MOV",
+    "krill_prokuronov": "Drill_1_Triple cone Turn _dubaiacademy_Krill Prokuronov.MOV",
+    "leon_nelson": "Drill_1_Triple cone Turn _dubaiacademy_Leon Nelson.MOV",
+    "louis_hopps": "Drill_1_Triple cone Turn _dubaiacademy_Louis Hopps.MOV",
+    "luca_focaccia": "Drill_1_Triple cone Turn _dubaiacademy_Luca Focaccia.MOV",
+    "oliver_rourke": "Drill_1_Triple cone Turn _dubaiacademy_Oliver Rourke.MOV",
+    "quin_rowe": "Drill_1_Triple cone Turn _dubaiacademy_Quin Rowe.MOV",
+    "rachid_dittrich": "Drill_1_Triple cone Turn _dubaiacademy_Rachid Dittrich.MOV",
+    "rayan_khadim": "Drill_1_Triple cone Turn _dubaiacademy_Rayan Khadim.MOV",
+    "robin_staubach": "Drill_1_Triple cone Turn _dubaiacademy_Robin Staubach.MOV",
+    "sanad_alkhresheh": "Drill_1_Triple cone Turn _dubaiacademy_Sanad Alkhresheh.MOV",
+    "tiernan_cotter": "Drill_1_Triple cone Turn _dubaiacademy_Tiernan Cotter.MOV",
+    "timofej_jeckl": "Drill_1_Triple cone Turn _dubaiacademy_Timofej Jeckl.MOV",
+    "tise_ogundele": "Drill_1_Triple cone Turn _dubaiacademy_Tise Ogundele.MOV",
+    "travis_muturi": "Drill_1_Triple cone Turn _dubaiacademy_Travis Muturi.MOV",
+    "vincent_brady": "Drill_1_Triple cone Turn _dubaiacademy_Vincent Brady.MOV",
+    "yassin_abdullah": "Drill_1_Triple cone Turn _dubaiacademy_Yassin Abdullah.MOV",
 }
 
 # Options
@@ -92,45 +92,51 @@ DETECTION_MODE = "standard"  # "standard", "strict", or "lenient"
 TEST_MODE = False  # Set to True to run validation against ground truth
 GROUND_TRUTH_CSV = Path(__file__).parent / "ground_truth.csv"
 TEST_OUTPUT_DIR = Path(__file__).parent / "test_results"
-# Tolerance for matching detected events to ground truth.
-# Default 1.5s accounts for human annotation imprecision.
-# Can be overridden with --tolerance CLI argument.
-TEST_TOLERANCE = 1.5  # +/- seconds for matching events
+# Frame tolerance for matching detected events to ground truth.
+# Default 45 frames (≈1.5s at 30fps) accounts for human annotation imprecision.
+# Can be overridden with --frame-tolerance CLI argument.
+TEST_FRAME_TOLERANCE = 45  # +/- frames for matching events
 
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
 def get_parquet_paths(player_name: str) -> dict:
-    """Get parquet file paths for a player."""
-    # Handle both naming conventions:
-    # - Folder can be "player_name" or "player_name_f8"
-    # - Files can be "player_name_" or "player_name_f8_"
+    """Get parquet file paths for a player.
 
-    # Try with _f8 suffix first (most common)
-    player_dir_f8 = PARQUET_BASE / f"{player_name}_f8"
-    if player_dir_f8.exists():
+    Triple Cone naming convention:
+    - Video: "Drill_1_Triple cone Turn _dubaiacademy_{Player Name}.MOV"
+    - Folder: "Drill_1_Triple cone Turn _dubaiacademy_{Player Name}/"
+    - Files: "{folder_name}_football.parquet", "_pose.parquet", "_cone.parquet"
+    """
+    # Get video filename from PLAYERS dict
+    video_file = PLAYERS.get(player_name)
+    if not video_file:
+        # Fallback: construct from player_name
+        player_dir = PARQUET_BASE / player_name
         return {
-            "ball": player_dir_f8 / f"{player_name}_f8_football.parquet",
-            "pose": player_dir_f8 / f"{player_name}_f8_pose.parquet",
-            "cone": player_dir_f8 / f"{player_name}_f8_cone.parquet",
-            "dir": player_dir_f8,
+            "ball": player_dir / f"{player_name}_football.parquet",
+            "pose": player_dir / f"{player_name}_pose.parquet",
+            "cone": player_dir / f"{player_name}_cone.parquet",
+            "dir": player_dir,
         }
 
-    # Try without _f8 suffix
-    player_dir = PARQUET_BASE / player_name
+    # Folder name = video filename without .MOV extension
+    folder_name = video_file.replace(".MOV", "")
+    player_dir = PARQUET_BASE / folder_name
+
     return {
-        "ball": player_dir / f"{player_name}_football.parquet",
-        "pose": player_dir / f"{player_name}_pose.parquet",
-        "cone": player_dir / f"{player_name}_cone.parquet",
+        "ball": player_dir / f"{folder_name}_football.parquet",
+        "pose": player_dir / f"{folder_name}_pose.parquet",
+        "cone": player_dir / f"{folder_name}_cone.parquet",
         "dir": player_dir,
     }
 
 
 def process_player(player_name: str) -> int:
-    """Process a single player's Figure-8 drill."""
+    """Process a single player's Triple Cone drill."""
     print("\n" + "=" * 60)
-    print(f"FIGURE-8 DRILL: {player_name.upper()}")
+    print(f"TRIPLE CONE DRILL: {player_name.upper()}")
     print("=" * 60)
 
     # Get paths
@@ -185,13 +191,13 @@ def process_player(player_name: str) -> int:
         print(f"  Video FPS: {fps:.2f} (default - video not found)")
 
     # 2. Create config
-    print(f"\n[2/5] Setting up Figure-8 detection (mode: {DETECTION_MODE})...")
+    print(f"\n[2/5] Setting up Triple Cone detection (mode: {DETECTION_MODE})...")
     if DETECTION_MODE == "strict":
         config = AppConfig.with_strict_detection()
     elif DETECTION_MODE == "lenient":
         config = AppConfig.with_lenient_detection()
     else:
-        config = AppConfig.for_figure8()
+        config = AppConfig.for_triple_cone()
 
     config.fps = fps
 
@@ -210,7 +216,6 @@ def process_player(player_name: str) -> int:
 
     print(f"  Frames processed: {result.total_frames}")
     print(f"  Laps completed: {result.total_laps}")
-    print(f"  Gate passages: {len(result.gate_passages)}")
 
     # 4. Export CSVs
     print("\n[4/5] Exporting results...")
@@ -223,17 +228,6 @@ def process_player(player_name: str) -> int:
     exporter.export_frame_analysis(result, str(frames_path))
     print(f"  Events: {events_path}")
     print(f"  Frames: {frames_path}")
-
-    # Figure-8 specific exports
-    if result.gate_passages:
-        passages_path = output_dir / "gate_passages.csv"
-        exporter.export_gate_passages(result, str(passages_path))
-        print(f"  Gate passages: {passages_path}")
-
-    if result.cone_roles:
-        roles_path = output_dir / "cone_roles.csv"
-        exporter.export_cone_roles(result, str(roles_path))
-        print(f"  Cone roles: {roles_path}")
 
     # 5. Create video (optional)
     if CREATE_VIDEO:
@@ -264,7 +258,7 @@ def process_player(player_name: str) -> int:
 
     # Summary
     print("\n" + "-" * 60)
-    print("FIGURE-8 DRILL SUMMARY")
+    print("TRIPLE CONE DRILL SUMMARY")
     print("-" * 60)
     print(f"Player: {player_name}")
     print(f"Detection mode: {DETECTION_MODE}")
@@ -272,9 +266,6 @@ def process_player(player_name: str) -> int:
     print("DRILL METRICS:")
     print(f"  Total frames: {result.total_frames}")
     print(f"  Laps completed: {result.total_laps}")
-    print(f"  Gate passages: {len(result.gate_passages)}")
-    print(f"    - Successful: {result.successful_passages}")
-    print(f"    - With loss: {result.failed_passages}")
     print()
     print("BALL CONTROL:")
     print(f"  Loss events: {result.total_loss_events}")
@@ -322,13 +313,6 @@ def process_player(player_name: str) -> int:
         print("  No loss events detected - excellent ball control!")
         print()
 
-    # Cone setup
-    if result.cone_roles:
-        print("CONE SETUP:")
-        for role in result.cone_roles:
-            print(f"  {role.role}: cone {role.cone_id} at ({role.field_x:.1f}, {role.field_y:.1f})")
-        print()
-
     print(f"Output: {output_dir}/")
     print("-" * 60)
 
@@ -354,12 +338,12 @@ def list_players():
     print(f"Parquet directory: {PARQUET_BASE}")
 
 
-def run_test_mode(tolerance: float = TEST_TOLERANCE) -> int:
+def run_test_mode(frame_tolerance: int = TEST_FRAME_TOLERANCE) -> int:
     """
     Run batch testing on all players with ground truth validation.
 
     Args:
-        tolerance: Time tolerance in seconds for matching events (default from config)
+        frame_tolerance: Frame tolerance for matching events (default 45 frames ≈ 1.5s at 30fps)
 
     Returns:
         0 on success, 1 on error
@@ -371,13 +355,14 @@ def run_test_mode(tolerance: float = TEST_TOLERANCE) -> int:
         save_report,
         save_csv_results,
         TestResult,
-        OverallTestSummary
+        OverallTestSummary,
+        DEFAULT_FRAME_TOLERANCE
     )
     from typing import Dict
 
     print("\n" + "=" * 60)
-    print("FIGURE-8 DETECTION - TEST MODE")
-    print(f"Tolerance: +/- {tolerance}s")
+    print("TRIPLE CONE DETECTION - TEST MODE")
+    print(f"Frame Tolerance: +/- {frame_tolerance} frames (~{frame_tolerance/30.0:.1f}s at 30fps)")
     print("=" * 60)
 
     # Load ground truth
@@ -436,7 +421,7 @@ def run_test_mode(tolerance: float = TEST_TOLERANCE) -> int:
         elif DETECTION_MODE == "lenient":
             config = AppConfig.with_lenient_detection()
         else:
-            config = AppConfig.for_figure8()
+            config = AppConfig.for_triple_cone()
 
         # Get video path for this player
         video_file = PLAYERS.get(player_name)
@@ -463,12 +448,12 @@ def run_test_mode(tolerance: float = TEST_TOLERANCE) -> int:
             continue
 
         # Compare with ground truth
-        gt_times = ground_truth.get(player_name, [])
+        gt_events = ground_truth.get(player_name, [])
         test_result = create_test_result(
             player_name=player_name,
             detected_events=result.events,
-            ground_truth_times=gt_times,
-            tolerance=tolerance
+            ground_truth_events=gt_events,
+            frame_tolerance=frame_tolerance
         )
 
         results[player_name] = test_result
@@ -527,7 +512,7 @@ def run_test_mode(tolerance: float = TEST_TOLERANCE) -> int:
     print(f"  Events:  {events_csv}")
 
     # Generate and save verbose text report (includes detailed FP/FN info)
-    report = generate_report(results, summary, tolerance)
+    report = generate_report(results, summary, frame_tolerance)
     report_path = save_report(report, TEST_OUTPUT_DIR, summary)
     print(f"\n✓ Detailed text report saved:")
     print(f"  Report:  {report_path}")
@@ -557,30 +542,30 @@ def run_test_mode(tolerance: float = TEST_TOLERANCE) -> int:
     return 0
 
 
-def parse_tolerance_arg() -> float:
-    """Parse --tolerance argument from command line."""
-    tolerance = TEST_TOLERANCE
+def parse_frame_tolerance_arg() -> int:
+    """Parse --frame-tolerance argument from command line."""
+    frame_tolerance = TEST_FRAME_TOLERANCE
     for i, arg in enumerate(sys.argv):
-        if arg == "--tolerance" and i + 1 < len(sys.argv):
+        if arg == "--frame-tolerance" and i + 1 < len(sys.argv):
             try:
-                tolerance = float(sys.argv[i + 1])
-                print(f"Using custom tolerance: {tolerance}s")
+                frame_tolerance = int(sys.argv[i + 1])
+                print(f"Using custom frame tolerance: {frame_tolerance} frames (~{frame_tolerance/30.0:.1f}s at 30fps)")
             except ValueError:
-                print(f"Warning: Invalid tolerance value '{sys.argv[i + 1]}', using default {TEST_TOLERANCE}s")
-    return tolerance
+                print(f"Warning: Invalid frame tolerance value '{sys.argv[i + 1]}', using default {TEST_FRAME_TOLERANCE} frames")
+    return frame_tolerance
 
 
 def main():
     """Main entry point."""
     # Check for test mode first
     if TEST_MODE:
-        tolerance = parse_tolerance_arg()
-        return run_test_mode(tolerance=tolerance)
+        frame_tolerance = parse_frame_tolerance_arg()
+        return run_test_mode(frame_tolerance=frame_tolerance)
 
     # Check for --test command line argument
     if len(sys.argv) >= 2 and sys.argv[1] == "--test":
-        tolerance = parse_tolerance_arg()
-        return run_test_mode(tolerance=tolerance)
+        frame_tolerance = parse_frame_tolerance_arg()
+        return run_test_mode(frame_tolerance=frame_tolerance)
 
     if len(sys.argv) < 2:
         print(__doc__)
@@ -618,7 +603,7 @@ def main():
                 elif DETECTION_MODE == "lenient":
                     config = AppConfig.with_lenient_detection()
                 else:
-                    config = AppConfig.for_figure8()
+                    config = AppConfig.for_triple_cone()
 
                 # Get video path for this player
                 video_file = PLAYERS.get(player)
@@ -650,10 +635,6 @@ def main():
                     exporter = CSVExporter()
                     exporter.export_events(result, str(output_dir / "loss_events.csv"))
                     exporter.export_frame_analysis(result, str(output_dir / "frame_analysis.csv"))
-                    if result.gate_passages:
-                        exporter.export_gate_passages(result, str(output_dir / "gate_passages.csv"))
-                    if result.cone_roles:
-                        exporter.export_cone_roles(result, str(output_dir / "cone_roles.csv"))
                 else:
                     print(f"FAILED: {result.error}")
                     results[player] = f"FAILED: {result.error}"
@@ -731,7 +712,7 @@ def main():
         print("-" * 70)
 
         print(f"\n📁 Results saved to: {OUTPUT_BASE.resolve()}/")
-        print("   Each player has: loss_events.csv, frame_analysis.csv, gate_passages.csv, cone_roles.csv")
+        print("   Each player has: loss_events.csv, frame_analysis.csv")
 
         return 0
 

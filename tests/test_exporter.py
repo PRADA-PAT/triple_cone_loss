@@ -7,12 +7,12 @@ from pathlib import Path
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from f8_loss.detection.csv_exporter import CSVExporter, export_to_csv
-from f8_loss.detection.data_structures import (
+from triple_cone_loss.detection.csv_exporter import CSVExporter, export_to_csv
+from triple_cone_loss.detection.data_structures import (
     DetectionResult, LossEvent, FrameData,
     EventType, ControlState
 )
-from f8_loss import (
+from triple_cone_loss import (
     detect_ball_control, load_parquet_data,
     AppConfig, BallControlDetector
 )
@@ -270,35 +270,35 @@ class TestPublicAPI:
 
     def test_import_all_exports(self):
         """Test all expected exports are available."""
-        import f8_loss
+        import triple_cone_loss
 
         # Config
-        assert hasattr(f8_loss, 'AppConfig')
-        assert hasattr(f8_loss, 'Figure8DrillConfig')  # Updated from DrillConfig
-        assert hasattr(f8_loss, 'DetectionConfig')
+        assert hasattr(triple_cone_loss, 'AppConfig')
+        assert hasattr(triple_cone_loss, 'TripleConeDrillConfig')  # Updated from DrillConfig
+        assert hasattr(triple_cone_loss, 'DetectionConfig')
 
         # Data structures
-        assert hasattr(f8_loss, 'FrameData')
-        assert hasattr(f8_loss, 'LossEvent')
-        assert hasattr(f8_loss, 'DetectionResult')
-        assert hasattr(f8_loss, 'ControlState')
+        assert hasattr(triple_cone_loss, 'FrameData')
+        assert hasattr(triple_cone_loss, 'LossEvent')
+        assert hasattr(triple_cone_loss, 'DetectionResult')
+        assert hasattr(triple_cone_loss, 'ControlState')
 
         # Functions
-        assert hasattr(f8_loss, 'load_parquet_data')
-        assert hasattr(f8_loss, 'detect_ball_control')
-        assert hasattr(f8_loss, 'export_to_csv')
+        assert hasattr(triple_cone_loss, 'load_parquet_data')
+        assert hasattr(triple_cone_loss, 'detect_ball_control')
+        assert hasattr(triple_cone_loss, 'export_to_csv')
 
         # Classes
-        assert hasattr(f8_loss, 'BallControlDetector')
-        assert hasattr(f8_loss, 'CSVExporter')
+        assert hasattr(triple_cone_loss, 'BallControlDetector')
+        assert hasattr(triple_cone_loss, 'CSVExporter')
 
     def test_version(self):
         """Test version is defined."""
-        import f8_loss
-        assert hasattr(f8_loss, '__version__')
+        import triple_cone_loss
+        assert hasattr(triple_cone_loss, '__version__')
         # Version should be a valid semver string
-        assert isinstance(f8_loss.__version__, str)
-        assert len(f8_loss.__version__.split('.')) == 3  # Major.Minor.Patch
+        assert isinstance(triple_cone_loss.__version__, str)
+        assert len(triple_cone_loss.__version__.split('.')) == 3  # Major.Minor.Patch
 
 
 if __name__ == "__main__":

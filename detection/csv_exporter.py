@@ -122,93 +122,6 @@ class CSVExporter:
             logger.error(f"Export failed: {e}")
             return False
 
-    def export_gate_passages(
-        self,
-        result: DetectionResult,
-        output_path: str
-    ) -> bool:
-        """
-        Export gate passage events to CSV (Figure-8 specific).
-
-        Args:
-            result: Detection result with gate_passages
-            output_path: Output file path
-
-        Returns:
-            True if successful
-        """
-        try:
-            if not result.gate_passages:
-                logger.warning("No gate passages to export")
-                return False
-
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-            df = pd.DataFrame([p.to_dict() for p in result.gate_passages])
-
-            # Round numeric columns
-            for col in df.select_dtypes(include=['float64']).columns:
-                df[col] = df[col].round(self.decimal_precision)
-
-            # Write with metadata header
-            with open(output_path, 'w') as f:
-                f.write(f"# Figure-8 Gate Passages\n")
-                f.write(f"# Total passages: {len(result.gate_passages)}\n")
-                f.write(f"# Successful: {result.successful_passages}\n")
-                f.write(f"# With loss: {result.failed_passages}\n")
-                f.write(f"# Laps completed: {result.total_laps}\n")
-                f.write("#\n")
-                df.to_csv(f, index=False)
-
-            logger.info(f"Exported {len(result.gate_passages)} gate passages to {output_path}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Export failed: {e}")
-            return False
-
-    def export_cone_roles(
-        self,
-        result: DetectionResult,
-        output_path: str
-    ) -> bool:
-        """
-        Export cone role assignments to CSV (Figure-8 specific).
-
-        Args:
-            result: Detection result with cone_roles
-            output_path: Output file path
-
-        Returns:
-            True if successful
-        """
-        try:
-            if not result.cone_roles:
-                logger.warning("No cone roles to export")
-                return False
-
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-            df = pd.DataFrame([r.to_dict() for r in result.cone_roles])
-
-            # Round numeric columns
-            for col in df.select_dtypes(include=['float64']).columns:
-                df[col] = df[col].round(self.decimal_precision)
-
-            # Write with metadata header
-            with open(output_path, 'w') as f:
-                f.write(f"# Figure-8 Cone Role Assignments\n")
-                f.write(f"# Total cones: {len(result.cone_roles)}\n")
-                f.write("#\n")
-                df.to_csv(f, index=False)
-
-            logger.info(f"Exported {len(result.cone_roles)} cone roles to {output_path}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Export failed: {e}")
-            return False
-
     def export_all(
         self,
         result: DetectionResult,
@@ -244,21 +157,6 @@ class CSVExporter:
                 'path': str(frames_path),
             }
         }
-
-        # Figure-8 specific exports
-        if result.gate_passages:
-            passages_path = output_dir / "gate_passages.csv"
-            results['gate_passages'] = {
-                'success': self.export_gate_passages(result, str(passages_path)),
-                'path': str(passages_path),
-            }
-
-        if result.cone_roles:
-            roles_path = output_dir / "cone_roles.csv"
-            results['cone_roles'] = {
-                'success': self.export_cone_roles(result, str(roles_path)),
-                'path': str(roles_path),
-            }
 
         return results
 

@@ -1,5 +1,8 @@
 """
-Configuration module for Figure-8 Ball Control Detection System.
+Configuration module for Ball Control Detection System.
+
+Supports:
+- Triple Cone drills (3 cones in horizontal line)
 
 Defines all configuration parameters using dataclasses for type safety
 and easy modification.
@@ -10,6 +13,11 @@ from pathlib import Path
 from enum import Enum
 
 
+class DrillType(Enum):
+    """Type of drill being analyzed."""
+    TRIPLE_CONE = "triple_cone"
+
+
 class DetectionMode(Enum):
     """Detection sensitivity modes."""
     STANDARD = "standard"
@@ -18,57 +26,66 @@ class DetectionMode(Enum):
 
 
 @dataclass
-class Figure8DrillConfig:
+class TripleConeDrillConfig:
     """
-    Figure-8 drill setup parameters.
+    Triple Cone drill setup parameters.
 
-    Cone arrangement (left to right on horizontal line):
-    [START] ---- [PAIR1_L] [PAIR1_R] ---- [PAIR2_L] [PAIR2_R]
+    Cone arrangement (horizontal line, left to right):
+    [CONE1/LEFT/HOME] ---- [CONE2/CENTER] ---- [CONE3/RIGHT]
 
-    - START: Single cone where player starts
-    - PAIR1 (Gate 1): First pair of cones with gap between them
-    - PAIR2 (Gate 2): Second pair of cones with gap between them
+    Drill pattern (one repetition):
+    CONE1 → CONE2(turn) → CONE1(turn) → CONE3(turn) → CONE1(turn) → repeat
 
-    Player pattern: Start → G1 → G2 → Turn → G2 → G1 → (repeat)
+    All 3 cones are turn points where player makes tight turns.
     """
-    expected_cone_count: int = 5  # 1 start + 2 pair1 + 2 pair2
-    cone_layout: str = "figure_8"
+    expected_cone_count: int = 3
+    cone_layout: str = "triple_cone"
 
-    # Cone role mapping (auto-detected from positions or manually set)
-    # These are populated by analyze_cone_positions()
-    start_cone_id: Optional[int] = None
-    gate1_cone_ids: Optional[Tuple[int, int]] = None  # First pair
-    gate2_cone_ids: Optional[Tuple[int, int]] = None  # Second pair
+    # Mean cone positions from parquet analysis (pixels)
+    # These are populated by analyzing cone parquet data
+    cone1_position: Optional[Tuple[float, float]] = None  # LEFT/HOME (px, py)
+    cone2_position: Optional[Tuple[float, float]] = None  # CENTER (px, py)
+    cone3_position: Optional[Tuple[float, float]] = None  # RIGHT (px, py)
 
-    # Gate definitions (populated after cone role detection)
-    gate_definitions: Dict[str, Tuple[int, int]] = field(
-        default_factory=lambda: {
-            "G1": None,  # Will be set to gate1_cone_ids
-            "G2": None,  # Will be set to gate2_cone_ids
-        }
-    )
+    # Turning zone configuration
+    zone_radius: float = 150.0  # Base radius for all turning zones (pixels)
+    zone_stretch_x: float = 1.0  # Horizontal stretch factor
+    zone_stretch_y: float = 5.0  # Vertical compression for side-view camera
 
-    # Geometry thresholds
-    gate_width_threshold: float = 200.0  # Max distance to be "within gate"
-    gate_passage_margin: float = 50.0    # Extra margin around gate center
+    # Expected cone spacing (from analysis: ~926px between adjacent cones)
+    expected_cone_spacing: float = 926.0  # pixels
+    cone_spacing_tolerance: float = 50.0  # pixels
 
-    # Expected drill pattern for validation
-    forward_gate_sequence: List[str] = field(
-        default_factory=lambda: ["G1", "G2"]
-    )
-    backward_gate_sequence: List[str] = field(
-        default_factory=lambda: ["G2", "G1"]
-    )
+    # Cone detection from parquet
+    cone_y_tolerance: float = 30.0  # Max Y deviation for horizontal line validation
 
-    # Clustering thresholds for auto-detection
-    pair_distance_threshold: float = 300.0  # Max distance for cones to be a "pair"
+    def set_cone_positions(
+        self,
+        cone1: Tuple[float, float],
+        cone2: Tuple[float, float],
+        cone3: Tuple[float, float]
+    ) -> None:
+        """Set cone positions from analysis."""
+        self.cone1_position = cone1
+        self.cone2_position = cone2
+        self.cone3_position = cone3
 
-    def update_gate_definitions(self):
-        """Update gate_definitions based on detected cone IDs."""
-        if self.gate1_cone_ids:
-            self.gate_definitions["G1"] = self.gate1_cone_ids
-        if self.gate2_cone_ids:
-            self.gate_definitions["G2"] = self.gate2_cone_ids
+    def validate_layout(self) -> bool:
+        """Validate that cones form expected horizontal line pattern."""
+        if not all([self.cone1_position, self.cone2_position, self.cone3_position]):
+            return False
+
+        # Check Y coordinates are roughly aligned (horizontal line)
+        y_coords = [self.cone1_position[1], self.cone2_position[1], self.cone3_position[1]]
+        y_range = max(y_coords) - min(y_coords)
+        if y_range > self.cone_y_tolerance:
+            return False
+
+        # Check X ordering (left to right)
+        if not (self.cone1_position[0] < self.cone2_position[0] < self.cone3_position[0]):
+            return False
+
+        return True
 
 
 @dataclass
@@ -87,6 +104,12 @@ class DetectionConfig:
     min_control_score: float = 0.45
 
     mode: DetectionMode = DetectionMode.STANDARD
+
+    # Intention-based (face direction) detection settings
+    # NOTE: Must match thresholds in video/annotate_triple_cone.py
+    use_intention_detection: bool = True  # Enable face-direction-based detection
+    nose_hip_facing_threshold: float = 15.0  # Min nose-hip X diff for facing direction
+    intention_sustained_frames: int = 10  # Frames to confirm intention-based loss
 
 
 @dataclass
@@ -126,7 +149,7 @@ class VisualizationConfig:
     show_cone_positions: bool = True
     show_event_markers: bool = True
     show_metrics_overlay: bool = True
-    show_gate_zones: bool = True  # Figure-8 specific
+    show_gate_zones: bool = True  # Triple Cone specific
 
     # Colors (BGR for OpenCV)
     ball_color: Tuple[int, int, int] = (0, 255, 255)  # Yellow
@@ -142,17 +165,30 @@ class VisualizationConfig:
 
 @dataclass
 class AppConfig:
-    """Main application configuration for Figure-8 drill."""
-    drill: Figure8DrillConfig = field(default_factory=Figure8DrillConfig)
+    """
+    Main application configuration for Triple Cone drill.
+
+    Triple cone drill has 3 cones in a horizontal line:
+    [CONE1/LEFT/HOME] ---- [CONE2/CENTER] ---- [CONE3/RIGHT]
+
+    All 3 cones are turn points where player makes tight turns.
+    """
+    drill: TripleConeDrillConfig = field(default_factory=TripleConeDrillConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     paths: PathConfig = field(default_factory=PathConfig)
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
     fps: float = 30.0
     verbose: bool = False
+    drill_type: DrillType = DrillType.TRIPLE_CONE
 
     @classmethod
-    def for_figure8(cls) -> 'AppConfig':
-        """Create config for Figure-8 drill (default)."""
+    def for_triple_cone(cls) -> 'AppConfig':
+        """Create config for Triple Cone drill (default)."""
+        return cls(drill_type=DrillType.TRIPLE_CONE)
+
+    @classmethod
+    def default(cls) -> 'AppConfig':
+        """Create default config for Triple Cone drill."""
         return cls()
 
     @classmethod
@@ -172,3 +208,12 @@ class AppConfig:
         config.detection.min_control_score = 0.35
         config.detection.loss_distance_threshold = 250.0
         return config
+
+    def set_cone_positions_from_parquet(
+        self,
+        cone1: Tuple[float, float],
+        cone2: Tuple[float, float],
+        cone3: Tuple[float, float]
+    ) -> None:
+        """Set cone positions from parquet analysis."""
+        self.drill.set_cone_positions(cone1, cone2, cone3)

@@ -1,58 +1,85 @@
 # Detection module - Loss of control calculation logic
 """
-Core detection logic for Figure-8 ball control analysis.
+Core detection logic for ball control analysis.
+
+Supports:
+- Triple Cone drills (3 cones in horizontal line)
 
 This module contains:
 - BallControlDetector: Main detection engine with detect_loss() method
-- Figure8ConeDetector: Cone role identification and gate tracking
+- TripleConeDetector: 3-cone phase tracking and turn detection
 - Data structures: ControlState, LossEvent, FrameData, etc.
-- Configuration: AppConfig, DetectionConfig
-- Data loading: load_cone_annotations, load_parquet_data
+- Configuration: AppConfig, DetectionConfig, TripleConeDrillConfig
+- Data loading: load_triple_cone_layout_from_parquet, load_parquet_data
 - Export: CSVExporter
+- Turning zones: TripleConeZoneSet (3 zones for CONE1, CONE2, CONE3)
 """
 
 from .ball_control_detector import BallControlDetector, detect_ball_control
-from .figure8_cone_detector import Figure8ConeDetector
+from .triple_cone_detector import TripleConeDetector, TripleConeConeDetector, TurnEvent, DrillState
 from .data_structures import (
-    ControlState, EventType, DrillPhase, DrillDirection,
-    ConeAnnotation, Figure8Layout, FrameData, LossEvent,
-    GatePassage, ConeRole, DetectionResult
+    # Core enums and states
+    ControlState, EventType, DrillDirection,
+    # Triple Cone structures (3-cone)
+    TripleConeDrillPhase, TripleConeLayout,
+    # Common structures
+    FrameData, LossEvent, DetectionResult
 )
 from .config import (
-    AppConfig, DetectionConfig, Figure8DrillConfig,
+    # Triple Cone config
+    AppConfig, DetectionConfig, TripleConeDrillConfig, DrillType,
+    # Common config
     PathConfig, VisualizationConfig, DetectionMode
 )
 from .data_loader import (
-    load_cone_annotations, load_parquet_data, load_all_data,
+    # 3-cone loading (primary)
+    load_triple_cone_layout_from_parquet, load_triple_cone_annotations,
+    # Parquet loading
+    load_parquet_data, load_all_data,
     extract_ankle_positions, get_closest_ankle_per_frame,
-    validate_data_alignment, get_frame_data, get_video_fps
+    validate_data_alignment, get_frame_data, get_video_fps,
+    # Constants
+    EXPECTED_CONE_ROLES
 )
 from .csv_exporter import CSVExporter, export_to_csv
 from .turning_zones import (
-    TurningZone, TurningZoneConfig, TurningZoneSet,
-    create_turning_zones, draw_turning_zone, draw_turning_zones,
-    START_ZONE_COLOR, GATE2_ZONE_COLOR, ZONE_HIGHLIGHT_COLOR,
+    # Base zone class
+    TurningZone,
+    # 3-cone zones
+    TripleConeZoneConfig, TripleConeZoneSet, create_triple_cone_zones,
+    # Drawing functions
+    draw_turning_zone, draw_triple_cone_zones,
+    # Zone colors
+    ZONE_HIGHLIGHT_COLOR,
+    CONE1_ZONE_COLOR, CONE2_ZONE_COLOR, CONE3_ZONE_COLOR,
 )
 
 __all__ = [
     # Detector classes
     'BallControlDetector', 'detect_ball_control',
-    'Figure8ConeDetector',
-    # Data structures
-    'ControlState', 'EventType', 'DrillPhase', 'DrillDirection',
-    'ConeAnnotation', 'Figure8Layout', 'FrameData', 'LossEvent',
-    'GatePassage', 'ConeRole', 'DetectionResult',
+    'TripleConeDetector', 'TripleConeConeDetector', 'TurnEvent', 'DrillState',
+    # Data structures - Core
+    'ControlState', 'EventType', 'DrillDirection',
+    'FrameData', 'LossEvent', 'DetectionResult',
+    # Data structures - Triple Cone (3-cone)
+    'TripleConeDrillPhase', 'TripleConeLayout',
     # Configuration
-    'AppConfig', 'DetectionConfig', 'Figure8DrillConfig',
-    'PathConfig', 'VisualizationConfig', 'DetectionMode',
+    'AppConfig', 'TripleConeDrillConfig', 'DrillType',
+    'DetectionConfig', 'PathConfig', 'VisualizationConfig', 'DetectionMode',
     # Data loading
-    'load_cone_annotations', 'load_parquet_data', 'load_all_data',
+    'load_triple_cone_layout_from_parquet', 'load_triple_cone_annotations',
+    'EXPECTED_CONE_ROLES',
+    'load_parquet_data', 'load_all_data',
     'extract_ankle_positions', 'get_closest_ankle_per_frame',
     'validate_data_alignment', 'get_frame_data', 'get_video_fps',
     # Export
     'CSVExporter', 'export_to_csv',
     # Turning zones
-    'TurningZone', 'TurningZoneConfig', 'TurningZoneSet',
-    'create_turning_zones', 'draw_turning_zone', 'draw_turning_zones',
-    'START_ZONE_COLOR', 'GATE2_ZONE_COLOR', 'ZONE_HIGHLIGHT_COLOR',
+    'TurningZone',
+    'TripleConeZoneConfig', 'TripleConeZoneSet', 'create_triple_cone_zones',
+    # Drawing functions
+    'draw_turning_zone', 'draw_triple_cone_zones',
+    # Zone colors
+    'ZONE_HIGHLIGHT_COLOR',
+    'CONE1_ZONE_COLOR', 'CONE2_ZONE_COLOR', 'CONE3_ZONE_COLOR',
 ]

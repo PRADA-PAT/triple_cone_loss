@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Drill Event Tracker for Figure-8 Cone Drill Analysis.
+Drill Event Tracker for Triple Cone Cone Drill Analysis.
 
 Tracks ball crossings at the START cone X position and detects:
 - PASS_BEHIND: Ball crosses cone X while above/behind the cone (ball_y < cone_y)
@@ -24,10 +24,14 @@ import numpy as np
 
 
 class DrillEventType(Enum):
-    """Types of drill events at the START cone."""
+    """Types of drill events at the START cone and gates."""
     PASS_ABOVE = "PASS_ABOVE"    # Ball crosses cone X while ball_y < cone_y (above cone in screen coords)
     PASS_BELOW = "PASS_BELOW"    # Ball crosses cone X while ball_y > cone_y (below cone in screen coords)
     TURN = "TURN"                 # Sequence of opposite crossings (above->below or below->above)
+    GATE1_ABOVE = "G1 ABOVE"     # Ball passed through Gate 1 coming from above
+    GATE1_BELOW = "G1 BELOW"     # Ball passed through Gate 1 coming from below
+    GATE2_ABOVE = "G2 ABOVE"     # Ball passed through Gate 2 coming from above
+    GATE2_BELOW = "G2 BELOW"     # Ball passed through Gate 2 coming from below
 
 
 @dataclass
@@ -70,28 +74,44 @@ class DrillEventTracker:
         events = tracker.get_events()
     """
 
-    def __init__(self, start_cone_x: float, start_cone_y: float, start_cone_y2: Optional[float] = None):
+    def __init__(
+        self,
+        start_cone_x: float,
+        start_cone_y: float,
+        start_cone_y2: Optional[float] = None,
+        gate1_line: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None,
+        gate2_line: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None
+    ):
         """
-        Initialize tracker with START cone position.
+        Initialize tracker with START cone position and optional gate lines.
 
         Args:
             start_cone_x: X coordinate of start cone center (pixels)
             start_cone_y: Y coordinate of start cone center (pixels)
             start_cone_y2: Bottom edge (y2) of cone bounding box (pixels).
                           If provided, used for above/below threshold instead of center.
+            gate1_line: Gate 1 line as ((x1, y1), (x2, y2)) - left to right cone positions
+            gate2_line: Gate 2 line as ((x1, y1), (x2, y2)) - left to right cone positions
         """
         self.start_cone_x = start_cone_x
         self.start_cone_y = start_cone_y
         # Use bbox bottom edge for above/below check, fallback to center if not provided
         self.start_cone_y_threshold = start_cone_y2 if start_cone_y2 is not None else start_cone_y
 
+        # Gate lines for gate crossing detection
+        self.gate1_line = gate1_line
+        self.gate2_line = gate2_line
+
         # Event tracking
         self._events: List[DrillEvent] = []
 
-        # State tracking
+        # State tracking for START cone
         self._prev_ball_x: Optional[float] = None
         self._prev_ball_above: Optional[bool] = None  # True if ball was above cone
         self._last_crossing_above: Optional[bool] = None  # Last PASS event direction
+
+        # State tracking for gate crossings (uses ball center)
+        self._prev_ball_center: Optional[Tuple[float, float]] = None
 
     def update(
         self,
@@ -113,9 +133,14 @@ class DrillEventTracker:
         if ball_bbox is None:
             return None
 
-        # Use ball center X, bottom Y (y2) as ground contact reference
+        # Use ball center X, bottom Y (y2) as ground contact reference for START cone
         ball_x = (ball_bbox['x1'] + ball_bbox['x2']) / 2  # Center X
         ball_y = ball_bbox['y2']  # Bottom edge = ground contact
+
+        # Ball center for gate crossing detection
+        ball_center_x = (ball_bbox['x1'] + ball_bbox['x2']) / 2
+        ball_center_y = (ball_bbox['y1'] + ball_bbox['y2']) / 2
+        ball_center = (ball_center_x, ball_center_y)
 
         timestamp = frame_id / fps
 
@@ -168,9 +193,54 @@ class DrillEventTracker:
                 # Update last crossing direction
                 self._last_crossing_above = ball_above_cone
 
+        # Check for gate crossings using ball center
+        if self._prev_ball_center is not None:
+            # Check Gate 1
+            if self.gate1_line is not None:
+                g1_direction = self._check_gate_crossing(
+                    self._prev_ball_center, ball_center, self.gate1_line
+                )
+                if g1_direction is not None:
+                    gate1_event_type = (
+                        DrillEventType.GATE1_ABOVE if g1_direction == "above"
+                        else DrillEventType.GATE1_BELOW
+                    )
+                    gate1_event = DrillEvent(
+                        event_type=gate1_event_type,
+                        timestamp_seconds=timestamp,
+                        frame_id=frame_id,
+                        ball_x=ball_center_x,
+                        ball_y=ball_center_y,
+                        ball_above_cone=(g1_direction == "above")
+                    )
+                    self._events.append(gate1_event)
+                    event = gate1_event
+
+            # Check Gate 2
+            if self.gate2_line is not None:
+                g2_direction = self._check_gate_crossing(
+                    self._prev_ball_center, ball_center, self.gate2_line
+                )
+                if g2_direction is not None:
+                    gate2_event_type = (
+                        DrillEventType.GATE2_ABOVE if g2_direction == "above"
+                        else DrillEventType.GATE2_BELOW
+                    )
+                    gate2_event = DrillEvent(
+                        event_type=gate2_event_type,
+                        timestamp_seconds=timestamp,
+                        frame_id=frame_id,
+                        ball_x=ball_center_x,
+                        ball_y=ball_center_y,
+                        ball_above_cone=(g2_direction == "above")
+                    )
+                    self._events.append(gate2_event)
+                    event = gate2_event
+
         # Update state for next frame
         self._prev_ball_x = ball_x
         self._prev_ball_above = ball_above_cone
+        self._prev_ball_center = ball_center
 
         return event
 
@@ -189,6 +259,85 @@ class DrillEventTracker:
         was_left = prev_x < self.start_cone_x
         now_left = curr_x < self.start_cone_x
         return was_left != now_left
+
+    @staticmethod
+    def _ccw(A: Tuple[float, float], B: Tuple[float, float], C: Tuple[float, float]) -> bool:
+        """Check if three points are in counter-clockwise order."""
+        return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+
+    def _segments_intersect(
+        self,
+        p1: Tuple[float, float],
+        p2: Tuple[float, float],
+        p3: Tuple[float, float],
+        p4: Tuple[float, float]
+    ) -> bool:
+        """
+        Check if line segment (p1, p2) intersects with line segment (p3, p4).
+
+        Uses the CCW (counter-clockwise) algorithm.
+
+        Args:
+            p1, p2: Endpoints of first line segment (ball trajectory)
+            p3, p4: Endpoints of second line segment (gate line)
+
+        Returns:
+            True if segments intersect
+        """
+        return (
+            self._ccw(p1, p3, p4) != self._ccw(p2, p3, p4) and
+            self._ccw(p1, p2, p3) != self._ccw(p1, p2, p4)
+        )
+
+    def _check_gate_crossing(
+        self,
+        prev_center: Tuple[float, float],
+        curr_center: Tuple[float, float],
+        gate_line: Tuple[Tuple[float, float], Tuple[float, float]]
+    ) -> Optional[str]:
+        """
+        Check if ball center crossed through a gate.
+
+        Detection logic:
+        1. Ball X must be within the gate's X range (between left and right cones)
+        2. Ball Y must cross the gate's Y threshold (from above to below or vice versa)
+
+        Args:
+            prev_center: Previous ball center (x, y)
+            curr_center: Current ball center (x, y)
+            gate_line: Gate line as ((left_x, left_y), (right_x, right_y))
+
+        Returns:
+            "above" if ball came from above (prev_y < gate_y) and went below
+            "below" if ball came from below (prev_y > gate_y) and went above
+            None if no crossing
+        """
+        # Get gate X boundaries (left cone has smaller X)
+        gate_left_x = min(gate_line[0][0], gate_line[1][0])
+        gate_right_x = max(gate_line[0][0], gate_line[1][0])
+
+        # Gate Y threshold (average of both cones)
+        gate_y = (gate_line[0][1] + gate_line[1][1]) / 2
+
+        # Check if current ball X is within gate range
+        curr_x, curr_y = curr_center
+        prev_x, prev_y = prev_center
+
+        # Ball must be within the gate's X range (with small margin)
+        margin = 10  # pixels
+        if not (gate_left_x - margin <= curr_x <= gate_right_x + margin):
+            return None
+
+        # Check if ball Y crossed the gate Y threshold
+        was_above = prev_y < gate_y
+        now_above = curr_y < gate_y
+
+        if was_above and not now_above:
+            return "above"  # Ball was above, now below → came from above
+        elif not was_above and now_above:
+            return "below"  # Ball was below, now above → came from below
+
+        return None
 
     def get_events(self) -> List[DrillEvent]:
         """Get all detected events."""
@@ -212,6 +361,7 @@ class DrillEventTracker:
         self._prev_ball_x = None
         self._prev_ball_above = None
         self._last_crossing_above = None
+        self._prev_ball_center = None
 
 
 # ============================================================================
@@ -317,6 +467,10 @@ EVENT_COLORS = {
     DrillEventType.PASS_ABOVE: (0, 100, 255),    # Orange-red (ball above cone)
     DrillEventType.PASS_BELOW: (0, 255, 100),    # Green (ball below cone)
     DrillEventType.TURN: (255, 255, 0),           # Cyan (direction changed)
+    DrillEventType.GATE1_ABOVE: (255, 150, 0),   # Blue (Gate 1 color - from above)
+    DrillEventType.GATE1_BELOW: (255, 150, 0),   # Blue (Gate 1 color - from below)
+    DrillEventType.GATE2_ABOVE: (255, 0, 255),   # Magenta (Gate 2 color - from above)
+    DrillEventType.GATE2_BELOW: (255, 0, 255),   # Magenta (Gate 2 color - from below)
 }
 
 

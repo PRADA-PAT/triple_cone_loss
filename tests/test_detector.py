@@ -8,13 +8,13 @@ from pathlib import Path
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from f8_loss.detection.ball_control_detector import (
+from triple_cone_loss.detection.ball_control_detector import (
     BallControlDetector,
     detect_ball_control,
 )
-from f8_loss.detection.config import AppConfig, DetectionConfig
-from f8_loss.detection.data_structures import DetectionResult, ControlState
-from f8_loss.detection.data_loader import load_parquet_data, extract_ankle_positions
+from triple_cone_loss.detection.config import AppConfig, DetectionConfig
+from triple_cone_loss.detection.data_structures import DetectionResult, ControlState
+from triple_cone_loss.detection.data_loader import load_parquet_data, extract_ankle_positions
 
 # Real data paths
 DATA_DIR = Path("/Users/pradyumn/Desktop/FOOTBALL data /AIM/7 Cone_output/Drill_1_7 Cone_dubaiacademy_Alex Mochar")
@@ -155,31 +155,14 @@ class TestConvenienceFunction:
         assert result.success is True
 
 
-class TestNearestCone:
-    """Tests for nearest cone detection."""
-
-    def test_nearest_cone_found(self, sample_data):
-        """Test nearest cone is correctly identified."""
-        ball_df, pose_df, cone_df = sample_data
-        detector = BallControlDetector()
-
-        # Ball at (50, 100), cones at (25, 150) and (75, 150)
-        # Distance to cone 3: sqrt((50-25)^2 + (100-150)^2) = sqrt(625+2500) = ~55.9
-        # Distance to cone 4: sqrt((50-75)^2 + (100-150)^2) = sqrt(625+2500) = ~55.9
-        cone_id, distance = detector._get_nearest_cone((50.0, 100.0), cone_df, 0)
-
-        assert cone_id in [3, 4]
-        assert distance < 60
-
-
 class TestGateDetection:
-    """Tests for gate detection via Figure8ConeDetector."""
+    """Tests for gate detection via TripleConeConeDetector."""
 
     def test_gate_detection_basic(self, sample_data):
-        """Test Figure8ConeDetector handles cone data."""
+        """Test TripleConeConeDetector handles cone data."""
         ball_df, pose_df, cone_df = sample_data
 
-        # The BallControlDetector uses Figure8ConeDetector internally
+        # The BallControlDetector uses TripleConeConeDetector internally
         detector = BallControlDetector()
         result = detector.detect(ball_df, pose_df, cone_df)
 

@@ -1,24 +1,27 @@
 """
-Ball Control Detection System for Figure-8 Cone Drills.
+Ball Control Detection System for Triple Cone Drills.
 
 A modular system for detecting when a player loses control of the ball
-during Figure-8 cone drill exercises.
+during Triple Cone drill exercises.
 
 Package Structure:
-    f8_loss/
+    triple_cone_loss/
     ├── detection/     # Loss of control calculation logic
     ├── annotation/    # Cone annotation and visualization tools
     └── video/         # Video generation with loss events marked
 
-Cone Setup:
-    [START] ---- [PAIR1_L] [PAIR1_R] ---- [PAIR2_L] [PAIR2_R]
+Cone Setup (3-cone layout):
+    [CONE1/HOME] ---- [CONE2/CENTER] ---- [CONE3/RIGHT]
 
-    - START: Single cone where player starts
-    - PAIR1 (Gate 1): First pair of cones with gap
-    - PAIR2 (Gate 2): Second pair of cones with gap
+    - CONE1 (HOME): Where player starts and returns
+    - CONE2 (CENTER): Middle turning cone
+    - CONE3 (RIGHT): Far right turning cone
+
+Drill Pattern:
+    CONE1 → CONE2(turn) → CONE1(turn) → CONE3(turn) → CONE1(turn) → repeat
 
 Quick Start:
-    from f8_loss import detect_ball_control, load_parquet_data, export_to_csv
+    from triple_cone_loss import detect_ball_control, load_parquet_data, export_to_csv
 
     # Load data
     ball_df = load_parquet_data("ball.parquet")
@@ -33,31 +36,29 @@ Quick Start:
 
 Classes:
     - AppConfig: Main configuration container
-    - Figure8DrillConfig: Figure-8 specific drill settings
+    - TripleConeDrillConfig: Triple Cone specific drill settings
     - BallControlDetector: Core detection class
-    - Figure8ConeDetector: Cone role detection and gate tracking
+    - TripleConeDetector: 3-cone phase tracking and turn detection
     - CSVExporter: CSV export functionality
-    - DrillVisualizer: Debug video visualization
 
 Data Structures:
     - FrameData: Per-frame analysis data
     - LossEvent: A detected loss-of-control event
-    - GatePassage: A gate passage event
-    - ConeRole: Cone role assignment
     - DetectionResult: Complete detection output
     - ControlState: Ball control state enum
-    - DrillPhase: Current phase in drill
+    - TripleConeDrillPhase: Current phase in drill (AT_CONE1, AT_CONE2, etc.)
     - DrillDirection: Forward/backward direction
+    - TripleConeLayout: 3-cone positions
 """
 
 # =============================================================================
-# Re-export from detection module (backwards compatibility)
+# Re-export from detection module
 # =============================================================================
 
 # Configuration
 from .detection.config import (
     AppConfig,
-    Figure8DrillConfig,
+    TripleConeDrillConfig,
     DetectionConfig,
     PathConfig,
     VisualizationConfig,
@@ -71,13 +72,9 @@ from .detection.data_structures import (
     FrameData,
     LossEvent,
     DetectionResult,
-    DrillPhase,
+    TripleConeDrillPhase,
     DrillDirection,
-    GatePassage,
-    ConeRole,
-    # Cone annotation structures
-    ConeAnnotation,
-    Figure8Layout,
+    TripleConeLayout,
 )
 
 # Data loading
@@ -88,15 +85,16 @@ from .detection.data_loader import (
     get_closest_ankle_per_frame,
     validate_data_alignment,
     ANKLE_KEYPOINTS,
-    # JSON cone loading
-    load_cone_annotations,
+    # 3-cone loading
+    load_triple_cone_layout_from_parquet,
+    load_triple_cone_annotations,
     EXPECTED_CONE_ROLES,
     # Video metadata
     get_video_fps,
 )
 
-# Figure-8 cone detection
-from .detection.figure8_cone_detector import Figure8ConeDetector
+# Triple Cone detection
+from .detection.triple_cone_detector import TripleConeDetector, TurnEvent, DrillState
 
 # Detection
 from .detection.ball_control_detector import (
@@ -108,6 +106,20 @@ from .detection.ball_control_detector import (
 from .detection.csv_exporter import (
     CSVExporter,
     export_to_csv,
+)
+
+# Turning zones
+from .detection.turning_zones import (
+    TurningZone,
+    TripleConeZoneConfig,
+    TripleConeZoneSet,
+    create_triple_cone_zones,
+    draw_turning_zone,
+    draw_triple_cone_zones,
+    CONE1_ZONE_COLOR,
+    CONE2_ZONE_COLOR,
+    CONE3_ZONE_COLOR,
+    ZONE_HIGHLIGHT_COLOR,
 )
 
 # =============================================================================
@@ -132,6 +144,7 @@ try:
         get_available_videos,
     )
     from .video.annotate_videos import annotate_video
+    from .video.annotate_triple_cone import annotate_triple_cone_video
     _HAS_VIDEO = True
 except ImportError:
     _HAS_VIDEO = False
@@ -139,16 +152,17 @@ except ImportError:
     convert_to_h264 = None
     get_available_videos = None
     annotate_video = None
+    annotate_triple_cone_video = None
 
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"  # Major update: 3-cone architecture
 
 __all__ = [
     # Version
     '__version__',
     # Config
     'AppConfig',
-    'Figure8DrillConfig',
+    'TripleConeDrillConfig',
     'DetectionConfig',
     'PathConfig',
     'VisualizationConfig',
@@ -159,13 +173,9 @@ __all__ = [
     'FrameData',
     'LossEvent',
     'DetectionResult',
-    'DrillPhase',
+    'TripleConeDrillPhase',
     'DrillDirection',
-    'GatePassage',
-    'ConeRole',
-    # Cone annotation structures
-    'ConeAnnotation',
-    'Figure8Layout',
+    'TripleConeLayout',
     # Data loading
     'load_parquet_data',
     'load_all_data',
@@ -173,19 +183,33 @@ __all__ = [
     'get_closest_ankle_per_frame',
     'validate_data_alignment',
     'ANKLE_KEYPOINTS',
-    # JSON cone loading
-    'load_cone_annotations',
+    # 3-cone loading
+    'load_triple_cone_layout_from_parquet',
+    'load_triple_cone_annotations',
     'EXPECTED_CONE_ROLES',
     # Video metadata
     'get_video_fps',
-    # Figure-8 detection
-    'Figure8ConeDetector',
+    # Triple Cone detection
+    'TripleConeDetector',
+    'TurnEvent',
+    'DrillState',
     # Detection
     'BallControlDetector',
     'detect_ball_control',
     # Export
     'CSVExporter',
     'export_to_csv',
+    # Turning zones
+    'TurningZone',
+    'TripleConeZoneConfig',
+    'TripleConeZoneSet',
+    'create_triple_cone_zones',
+    'draw_turning_zone',
+    'draw_triple_cone_zones',
+    'CONE1_ZONE_COLOR',
+    'CONE2_ZONE_COLOR',
+    'CONE3_ZONE_COLOR',
+    'ZONE_HIGHLIGHT_COLOR',
     # Visualization (optional)
     'DrillVisualizer',
     'ConeAnnotator',
@@ -194,4 +218,5 @@ __all__ = [
     'convert_to_h264',
     'get_available_videos',
     'annotate_video',
+    'annotate_triple_cone_video',
 ]

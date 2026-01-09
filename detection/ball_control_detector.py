@@ -1,7 +1,7 @@
 """
-Ball Control Detector - Simplified for Figure-8 drill.
+Ball Control Detector - Simplified for Triple Cone drill.
 
-Detects ball control loss events during Figure-8 cone drill.
+Detects ball control loss events during Triple Cone drill.
 Tracks gate passages, drill phases, and lap completion.
 
 DETECTION LOGIC LOCATION:
@@ -21,29 +21,29 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 
-from .config import AppConfig, Figure8DrillConfig
+from .config import AppConfig, TripleConeDrillConfig
 from .data_structures import (
     ControlState, EventType, FrameData,
     LossEvent, DetectionResult,
-    DrillPhase, DrillDirection, GatePassage, ConeRole, Figure8Layout
+    TripleConeDrillPhase, DrillDirection, TripleConeLayout
 )
 from .data_loader import (
     extract_ankle_positions,
     get_closest_ankle_per_frame,
-    load_cone_annotations
+    load_triple_cone_layout_from_parquet
 )
-from .figure8_cone_detector import Figure8ConeDetector
-from .turning_zones import TurningZoneSet, TurningZoneConfig, create_turning_zones
+from .triple_cone_detector import TripleConeDetector, TurnEvent
+from .turning_zones import TripleConeZoneSet, TripleConeZoneConfig, create_triple_cone_zones
 
 logger = logging.getLogger(__name__)
 
 
 class BallControlDetector:
     """
-    Main class for detecting ball control loss events in Figure-8 drill.
+    Main class for detecting ball control loss events in Triple Cone drill.
 
     Usage:
-        config = AppConfig.for_figure8()
+        config = AppConfig.for_triple_cone()
         detector = BallControlDetector(config)
         result = detector.detect(ball_df, pose_df, cone_df)
     """
@@ -55,28 +55,28 @@ class BallControlDetector:
         video_path: Optional[str] = None
     ):
         """
-        Initialize detector with Figure-8 config.
+        Initialize detector with Triple Cone config.
 
         Args:
-            config: Application configuration (defaults to Figure-8 config)
+            config: Application configuration (defaults to Triple Cone config)
             parquet_dir: Path to parquet directory for loading manual cone annotations
             video_path: Path to video file for getting actual video dimensions
         """
-        self.config = config or AppConfig.for_figure8()
+        self.config = config or AppConfig.for_triple_cone()
         self.parquet_dir = parquet_dir
         self.video_path = video_path
 
-        if not isinstance(self.config.drill, Figure8DrillConfig):
-            self.config.drill = Figure8DrillConfig()
+        if not isinstance(self.config.drill, TripleConeDrillConfig):
+            self.config.drill = TripleConeDrillConfig()
 
         self._detection_config = self.config.detection
-        self._drill_config: Figure8DrillConfig = self.config.drill
+        self._drill_config: TripleConeDrillConfig = self.config.drill
 
-        # Figure-8 specific detector
-        self._f8_detector: Optional[Figure8ConeDetector] = None
+        # Triple Cone specific detector (3-cone mode)
+        self._cone_detector: Optional[TripleConeDetector] = None
 
-        # Cone roles from JSON annotations (static positions)
-        self._cone_roles: List[ConeRole] = []
+        # Cone layout (3 cones from parquet)
+        self._cone_layout: Optional[TripleConeLayout] = None
 
         # Video dimensions (will be populated from video file)
         self._video_width: int = 1920  # Default fallback
@@ -87,7 +87,7 @@ class BallControlDetector:
         # State tracking
         self._current_state = ControlState.CONTROLLED
         self._current_direction = DrillDirection.STATIONARY
-        self._current_phase = DrillPhase.AT_START
+        self._current_phase = TripleConeDrillPhase.AT_CONE1
         self._events: List[LossEvent] = []
         self._frame_data: List[FrameData] = []
         self._event_counter = 0
@@ -102,17 +102,25 @@ class BallControlDetector:
         # Direction history for fallback when player stops (STATIC direction)
         self._direction_history: deque = deque(maxlen=15)  # Track recent directions
 
-        # Turning zones (loaded from JSON annotations)
-        self._turning_zones: Optional[TurningZoneSet] = None
-        self._figure8_layout: Optional[Figure8Layout] = None
+        # Turning zones (3 zones for CONE1, CONE2, CONE3)
+        self._turning_zones: Optional[TripleConeZoneSet] = None
 
-        # Ball-behind detection config
+        # Ball-behind detection config (momentum-based)
         # NOTE: Must match BALL_POSITION_THRESHOLD in video/annotate_with_json_cones.py
         self._behind_threshold = 20.0  # Pixels - ball must be this far behind hip
-        self._behind_sustained_frames = 15  # ~0.5 sec at 30fps to confirm loss
+        self._behind_sustained_frames = 10  # ~0.33 sec at 30fps to confirm loss
         self._movement_threshold = 3.0  # Min hip movement to determine direction
 
+        # Intention-based (face direction) detection config
+        # NOTE: Must match thresholds in video/annotate_triple_cone.py
+        self._nose_hip_facing_threshold = self._detection_config.nose_hip_facing_threshold
+        self._intention_sustained_frames = self._detection_config.intention_sustained_frames
+        self._use_intention_detection = self._detection_config.use_intention_detection
+        self._min_keypoint_confidence = 0.3  # Same as video/annotate_triple_cone.py
+
         logger.info(f"BallControlDetector initialized (video: {self._video_width}x{self._video_height})")
+        if self._use_intention_detection:
+            logger.info("  Intention-based (face direction) detection: ENABLED")
 
     def _load_video_dimensions(self, video_path: str) -> None:
         """
@@ -151,7 +159,7 @@ class BallControlDetector:
         fps: float = 30.0
     ) -> DetectionResult:
         """
-        Run ball control detection for Figure-8 drill.
+        Run ball control detection for Triple Cone drill.
 
         Args:
             ball_df: Ball detection DataFrame
@@ -163,7 +171,7 @@ class BallControlDetector:
             DetectionResult with events and frame data
         """
         try:
-            logger.info("Starting Figure-8 drill detection...")
+            logger.info("Starting Triple Cone drill detection...")
             logger.info(f"  Ball frames: {len(ball_df)}")
             logger.info(f"  Pose records: {len(pose_df)}")
             logger.info(f"  Cone records: {len(cone_df)}")
@@ -178,28 +186,26 @@ class BallControlDetector:
             # Reset state
             self._reset_state()
 
-            # Initialize Figure-8 detector and identify cone roles
-            # Passing parquet_dir enables loading manual cone annotations if available
-            self._f8_detector = Figure8ConeDetector(self._drill_config, parquet_dir=self.parquet_dir)
-            cone_roles = self._f8_detector.identify_cone_roles(cone_df, frame_id=0)
-            self._f8_detector.setup_gates(cone_roles)
+            # Initialize Triple Cone detector (3-cone mode)
+            zone_config = TripleConeZoneConfig.default()
+            self._cone_detector = TripleConeDetector(self._drill_config, zone_config)
 
-            # Store cone roles for use in _get_nearest_cone (static positions from JSON)
-            self._cone_roles = cone_roles
-
-            logger.info(f"Cone roles identified: {len(cone_roles)} cones")
-
-            # Load Figure8Layout and create turning zones for ball-behind detection
+            # Load cone positions from parquet data
             if self.parquet_dir:
-                try:
-                    json_path = Path(self.parquet_dir) / "cone_annotations.json"
-                    if json_path.exists():
-                        self._figure8_layout = load_cone_annotations(str(json_path))
-                        zone_config = TurningZoneConfig.default()
-                        self._turning_zones = create_turning_zones(self._figure8_layout, zone_config)
-                        logger.info(f"Turning zones created: START and GATE2")
-                except Exception as e:
-                    logger.warning(f"Could not load turning zones: {e}")
+                cone_parquet_files = list(Path(self.parquet_dir).glob("*_cone.parquet"))
+                if cone_parquet_files:
+                    cone_parquet_path = str(cone_parquet_files[0])
+                    self._cone_layout = self._cone_detector.setup_from_parquet(cone_parquet_path)
+                    self._turning_zones = self._cone_detector.turning_zones
+                    logger.info(
+                        f"3-cone layout loaded: CONE1=({self._cone_layout.cone1_x:.0f}, {self._cone_layout.cone1_y:.0f}), "
+                        f"CONE2=({self._cone_layout.cone2_x:.0f}, {self._cone_layout.cone2_y:.0f}), "
+                        f"CONE3=({self._cone_layout.cone3_x:.0f}, {self._cone_layout.cone3_y:.0f})"
+                    )
+                else:
+                    logger.warning(f"No cone parquet found in {self.parquet_dir}")
+            else:
+                logger.warning("No parquet_dir provided, cannot load cone positions")
 
             # Extract ankles and find closest per frame
             ankle_df = extract_ankle_positions(pose_df)
@@ -272,9 +278,7 @@ class BallControlDetector:
                 total_frames=total_frames,
                 events=self._events,
                 frame_data=self._frame_data,
-                gate_passages=self._f8_detector.gate_passages if self._f8_detector else [],
-                cone_roles=cone_roles,
-                total_laps=self._f8_detector.lap_count if self._f8_detector else 0,
+                total_laps=self._cone_detector.rep_count if self._cone_detector else 0,
             )
 
             logger.info(f"Detection complete:")
@@ -298,7 +302,7 @@ class BallControlDetector:
         """Reset internal state for new detection run."""
         self._current_state = ControlState.CONTROLLED
         self._current_direction = DrillDirection.STATIONARY
-        self._current_phase = DrillPhase.AT_START
+        self._current_phase = TripleConeDrillPhase.AT_CONE1
         self._events = []
         self._frame_data = []
         self._event_counter = 0
@@ -311,8 +315,8 @@ class BallControlDetector:
         # Reset direction history
         self._direction_history.clear()
 
-        if self._f8_detector:
-            self._f8_detector.reset()
+        if self._cone_detector:
+            self._cone_detector.reset()
 
     def _analyze_frame(
         self,
@@ -335,10 +339,13 @@ class BallControlDetector:
         velocity = row['ball_velocity']
         velocity_pixel = row.get('ball_velocity_pixel', velocity)  # Pixel velocity for boundary detection
 
-        # Extract hip position for ball-behind detection
+        # Extract hip and nose positions for ball-behind detection
         hip_pixel_pos: Optional[Tuple[float, float]] = None
+        nose_pixel_pos: Optional[Tuple[float, float]] = None
         if pose_df is not None:
             hip_pixel_pos = self._extract_hip_position(frame_id, pose_df)
+            if self._use_intention_detection:
+                nose_pixel_pos = self._extract_nose_position(frame_id, pose_df)
 
         # Update hip history and calculate player movement direction
         player_direction: Optional[str] = None
@@ -373,6 +380,16 @@ class BallControlDetector:
                 ball_pixel_pos[0], ball_pixel_pos[1]
             )
 
+        # Calculate intention-based (face direction) ball position
+        facing_direction: Optional[str] = None
+        ball_behind_intention: Optional[bool] = None
+        ball_intention_position: Optional[str] = None
+        if self._use_intention_detection and nose_pixel_pos is not None:
+            facing_direction = self._determine_facing_direction(nose_pixel_pos, hip_pixel_pos)
+            ball_behind_intention, ball_intention_position = self._is_ball_behind_intention(
+                ball_pixel_pos, hip_pixel_pos, facing_direction
+            )
+
         # ============================================================
         # DETECTION LOGIC - calls detect_loss()
         # ============================================================
@@ -388,7 +405,10 @@ class BallControlDetector:
             history=self._frame_data,
             hip_pixel_pos=hip_pixel_pos,
             player_direction=player_direction,
-            in_turning_zone=in_turning_zone
+            in_turning_zone=in_turning_zone,
+            # Intention-based parameters
+            facing_direction=facing_direction,
+            ball_behind_intention=ball_behind_intention
         )
 
         # Determine control state from detection result
@@ -410,44 +430,33 @@ class BallControlDetector:
             row=row
         )
 
-        # Get nearest cone (uses static positions from JSON annotations)
-        # JSON cone positions are in pixel coords, so use ball pixel position
+        # Get nearest cone (uses 3-cone layout)
         ball_pixel_pos = (row['ball_x'], row['ball_y'])
         nearest_cone_id, nearest_cone_dist = self._get_nearest_cone(ball_pixel_pos)
 
-        # Figure-8 tracking (gate passages, direction, phase)
+        # Triple Cone tracking (3-cone phase and direction)
         drill_phase = None
         drill_direction = None
-        current_gate = None
+        current_gate = None  # Legacy field, not used in 3-cone drill
 
-        if self._f8_detector:
+        if self._cone_detector:
+            # Calculate direction from ball movement
             if self._prev_ball_pos:
-                dx = ball_pos[0] - self._prev_ball_pos[0]
-                if abs(dx) > 5:
-                    drill_direction = DrillDirection.FORWARD if dx > 0 else DrillDirection.BACKWARD
-                else:
-                    drill_direction = DrillDirection.STATIONARY
-                self._current_direction = drill_direction
-
-                # Detect gate passage
-                passage = self._f8_detector.detect_gate_passage(
-                    self._prev_ball_pos,
-                    ball_pos,
-                    frame_id,
-                    timestamp,
-                    ankle_pos,
-                    control_state == ControlState.CONTROLLED
+                drill_direction = self._cone_detector.get_direction_from_movement(
+                    self._prev_ball_pos[0], ball_pos[0]
                 )
-
-                if passage:
-                    current_gate = passage.gate_id
-                    self._f8_detector.update_lap_count(passage)
+                self._current_direction = drill_direction
             else:
                 drill_direction = DrillDirection.STATIONARY
 
-            drill_phase = self._f8_detector.get_current_phase(
-                ball_pos, self._current_direction
+            # Update detector state (tracks phase, detects turns)
+            state = self._cone_detector.update(
+                ball_pixel_pos,  # Use pixel coords for zone detection
+                drill_direction,
+                frame_id,
+                timestamp
             )
+            drill_phase = state.phase
             self._current_phase = drill_phase
 
         self._prev_ball_pos = ball_pos
@@ -481,13 +490,19 @@ class BallControlDetector:
             control_state=control_state,
             drill_phase=drill_phase,
             drill_direction=drill_direction,
-            lap_count=self._f8_detector.lap_count if self._f8_detector else 0,
-            # New fields for ball-behind detection
+            lap_count=self._cone_detector.rep_count if self._cone_detector else 0,
+            # New fields for ball-behind detection (momentum-based)
             hip_x=hip_pixel_pos[0] if hip_pixel_pos else None,
             hip_y=hip_pixel_pos[1] if hip_pixel_pos else None,
             player_movement_direction=player_direction,
             ball_behind_player=ball_behind,
             in_turning_zone=in_turning_zone,
+            # Intention-based (face direction) fields
+            nose_x=nose_pixel_pos[0] if nose_pixel_pos else None,
+            nose_y=nose_pixel_pos[1] if nose_pixel_pos else None,
+            player_facing_direction=facing_direction,
+            ball_behind_intention=ball_behind_intention,
+            ball_intention_position=ball_intention_position,
         )
 
     # ================================================================
@@ -557,15 +572,121 @@ class BallControlDetector:
 
         delta_x = ball_pixel_pos[0] - hip_pixel_pos[0]
 
-        # Ball is "behind" if it's opposite to movement direction
+        # Ball is "behind" if it's on the opposite side of movement direction
+        # Simple rule: ball should be on the same side as where player is heading
         if player_direction == "LEFT":
-            # Moving left = forward direction, ball to RIGHT of hip = behind
+            # Moving LEFT: ball to RIGHT of hip = BEHIND
             return delta_x > self._behind_threshold
         elif player_direction == "RIGHT":
-            # Moving right = backward direction, ball to LEFT of hip = behind
+            # Moving RIGHT: ball to LEFT of hip = BEHIND
             return delta_x < -self._behind_threshold
 
         return None
+
+    def _extract_nose_position(
+        self,
+        frame_id: int,
+        pose_df: pd.DataFrame
+    ) -> Optional[Tuple[float, float]]:
+        """
+        Extract nose position from pose data for a given frame.
+
+        Args:
+            frame_id: Frame number to extract nose for
+            pose_df: Full pose DataFrame
+
+        Returns:
+            (nose_x, nose_y) in pixels, or None if not found
+        """
+        frame_pose = pose_df[pose_df['frame_idx'] == frame_id]
+        if frame_pose.empty:
+            return None
+
+        nose_row = frame_pose[frame_pose['keypoint_name'] == 'nose']
+        if not nose_row.empty:
+            nose = nose_row.iloc[0]
+            if nose['confidence'] >= self._min_keypoint_confidence:
+                return (float(nose['x']), float(nose['y']))
+
+        return None
+
+    def _determine_facing_direction(
+        self,
+        nose_pos: Optional[Tuple[float, float]],
+        hip_pos: Optional[Tuple[float, float]]
+    ) -> Optional[str]:
+        """
+        Determine if player torso is facing LEFT or RIGHT.
+
+        Uses nose position relative to hip:
+        - Facing RIGHT: nose.x > hip.x (head is to the right of body center)
+        - Facing LEFT: nose.x < hip.x (head is to the left of body center)
+
+        This captures turn intention since head turns before body.
+
+        Args:
+            nose_pos: Nose position in pixels
+            hip_pos: Hip position in pixels
+
+        Returns:
+            'RIGHT', 'LEFT', or None if data unreliable
+        """
+        if nose_pos is None or hip_pos is None:
+            return None
+
+        diff = nose_pos[0] - hip_pos[0]
+
+        if diff > self._nose_hip_facing_threshold:
+            return "RIGHT"
+        elif diff < -self._nose_hip_facing_threshold:
+            return "LEFT"
+        else:
+            return None  # Aligned/neutral
+
+    def _is_ball_behind_intention(
+        self,
+        ball_pixel_pos: Tuple[float, float],
+        hip_pixel_pos: Optional[Tuple[float, float]],
+        facing_direction: Optional[str]
+    ) -> Tuple[Optional[bool], Optional[str]]:
+        """
+        Determine if ball is behind player relative to FACING direction (intention).
+
+        Unlike momentum-based detection, this uses where the player is LOOKING
+        (nose-hip orientation) rather than where they're MOVING.
+
+        Args:
+            ball_pixel_pos: Ball position in pixels
+            hip_pixel_pos: Hip position in pixels (or None)
+            facing_direction: "LEFT", "RIGHT", or None (from nose-hip)
+
+        Returns:
+            Tuple of:
+            - is_behind: True if ball is behind, False if in front, None if can't determine
+            - position: "I-FRONT", "I-BEHIND", "I-ALIGNED", or None
+        """
+        if hip_pixel_pos is None or facing_direction is None:
+            return None, None
+
+        delta_x = ball_pixel_pos[0] - hip_pixel_pos[0]
+
+        # Check if ball is aligned with player
+        if abs(delta_x) < self._behind_threshold:
+            return False, "I-ALIGNED"
+
+        # Determine front/behind based on facing direction
+        if facing_direction == "LEFT":
+            # Facing left: FRONT = ball to left (negative delta)
+            if delta_x < 0:
+                return False, "I-FRONT"
+            else:
+                return True, "I-BEHIND"
+        else:  # RIGHT
+            # Facing right: FRONT = ball to right (positive delta)
+            if delta_x > 0:
+                return False, "I-FRONT"
+            else:
+                return True, "I-BEHIND"
 
     # ================================================================
     # DETECTION LOGIC - CATEGORIZED LOSS DETECTION
@@ -583,14 +704,18 @@ class BallControlDetector:
         hip_pixel_pos: Optional[Tuple[float, float]] = None,
         player_direction: Optional[str] = None,
         in_turning_zone: Optional[str] = None,
-        velocity_pixel: Optional[float] = None
+        velocity_pixel: Optional[float] = None,
+        # Intention-based parameters
+        facing_direction: Optional[str] = None,
+        ball_behind_intention: Optional[bool] = None
     ) -> Tuple[bool, Optional[EventType]]:
         """
         Detect if ball control is lost.
 
-        Detects two types of loss events:
+        Detects three types of loss events:
         1. BOUNDARY_VIOLATION - Ball exits video frame (out of bounds)
-        2. BALL_BEHIND_PLAYER - Ball stays behind player for sustained period
+        2. BALL_BEHIND_PLAYER - Ball stays behind player for sustained period (momentum-based)
+        3. BALL_BEHIND_INTENTION - Ball stays behind player's facing direction (intention-based)
 
         Args:
             ball_pos: Ball position (field_x, field_y)
@@ -602,9 +727,11 @@ class BallControlDetector:
             timestamp: Current timestamp in seconds
             history: List of previous FrameData (for temporal analysis)
             hip_pixel_pos: Player hip position in pixels (for ball-behind detection)
-            player_direction: "LEFT", "RIGHT", or None
-            in_turning_zone: "START", "GATE2", or None (suppress ball-behind in zones)
+            player_direction: "LEFT", "RIGHT", or None (movement-based)
+            in_turning_zone: "CONE1", "CONE2", "CONE3", or None (suppress ball-behind in zones)
             velocity_pixel: Ball velocity in pixels/frame (for boundary stuck detection)
+            facing_direction: "LEFT", "RIGHT", or None (from nose-hip orientation)
+            ball_behind_intention: True if ball is behind facing direction
 
         Returns:
             Tuple of:
@@ -740,6 +867,67 @@ class BallControlDetector:
                         )
                         return True, EventType.BALL_BEHIND_PLAYER
 
+        # ============================================================
+        # 3. BALL_BEHIND_INTENTION - Ball behind player's facing direction
+        # ============================================================
+        # Uses nose-hip orientation (intention) instead of movement direction.
+        # This captures cases where player is looking one way but ball is behind
+        # their facing direction.
+
+        if not self._use_intention_detection:
+            return False, None
+
+        # NOTE: Unlike BALL_BEHIND_PLAYER, we do NOT skip turning zones for intention detection.
+        # Intention (facing direction) should be tracked even during turns.
+
+        # Skip if no facing direction information
+        if facing_direction is None or ball_behind_intention is None:
+            return False, None
+
+        # Check if ball is currently behind facing direction
+        if not ball_behind_intention:
+            # Ball is not behind intention - check if we should continue LOST state
+            if len(history) >= 5:
+                recent_lost = sum(1 for f in history[-5:] if f.control_state == ControlState.LOST)
+                if recent_lost >= 3:
+                    # Check if this was an intention-based loss
+                    ball_hip_dist = abs(ball_pixel_pos[0] - hip_pixel_pos[0]) if hip_pixel_pos else 0
+                    RECOVERY_DISTANCE_THRESHOLD = 80.0
+                    if ball_hip_dist > RECOVERY_DISTANCE_THRESHOLD:
+                        logger.debug(
+                            f"Frame {frame_id}: Continuing BALL_BEHIND_INTENTION loss "
+                            f"(ball-hip dist={ball_hip_dist:.0f}px, awaiting recovery)"
+                        )
+                        return True, EventType.BALL_BEHIND_INTENTION
+            return False, None
+
+        # Check for sustained "behind intention" pattern in history
+        if len(history) >= self._intention_sustained_frames:
+            recent = history[-self._intention_sustained_frames:]
+
+            # Count consecutive frames where ball was behind intention
+            behind_count = 0
+            for frame in recent:
+                if frame.ball_behind_intention is True:
+                    behind_count += 1
+                else:
+                    behind_count = 0
+
+            # Only trigger if ball was behind for entire sustained period
+            if behind_count >= self._intention_sustained_frames - 1:
+                # Verify player facing direction was consistent
+                facings = [f.player_facing_direction for f in recent if f.player_facing_direction]
+                if len(facings) >= self._intention_sustained_frames // 2:
+                    dominant_facing = max(set(facings), key=facings.count)
+                    same_facing_ratio = facings.count(dominant_facing) / len(facings)
+
+                    if same_facing_ratio >= 0.7:  # 70% consistency threshold
+                        logger.debug(
+                            f"Frame {frame_id}: BALL_BEHIND_INTENTION detected "
+                            f"(behind for {behind_count} frames, facing={dominant_facing})"
+                        )
+                        return True, EventType.BALL_BEHIND_INTENTION
+
         return False, None
 
     # ================================================================
@@ -795,13 +983,22 @@ class BallControlDetector:
         self._current_state = new_state
 
     def _get_severity(self) -> str:
-        """Get severity based on current drill phase."""
-        if self._current_phase in [DrillPhase.PASSING_G1, DrillPhase.PASSING_G2]:
+        """Get severity based on current drill phase (3-cone)."""
+        # High severity at turning cones
+        if self._current_phase in [
+            TripleConeDrillPhase.AT_CONE2,
+            TripleConeDrillPhase.AT_CONE3,
+        ]:
             return "high"
-        elif self._current_phase == DrillPhase.AT_TURN:
-            return "high"
-        elif self._current_phase == DrillPhase.BETWEEN_GATES:
+        # Medium severity while moving between cones
+        elif self._current_phase in [
+            TripleConeDrillPhase.GOING_TO_CONE2,
+            TripleConeDrillPhase.GOING_TO_CONE3,
+            TripleConeDrillPhase.RETURNING_FROM_CONE2,
+            TripleConeDrillPhase.RETURNING_FROM_CONE3,
+        ]:
             return "medium"
+        # Low severity at home cone
         return "low"
 
     def _check_ball_only_boundary_violations(
@@ -1009,26 +1206,32 @@ class BallControlDetector:
         ball_pos: Tuple[float, float]
     ) -> Tuple[int, float]:
         """
-        Get nearest cone to ball position using static JSON annotations.
+        Get nearest cone to ball position using 3-cone layout.
 
-        Uses self._cone_roles which contains static cone positions from
-        cone_annotations.json. No longer depends on per-frame cone_df lookups.
+        Uses self._cone_layout which contains 3 cone positions from parquet data.
+        Returns (cone_id, distance) where cone_id is 1, 2, or 3.
         """
-        if not self._cone_roles:
+        if self._cone_layout is None:
             return -1, float('inf')
+
+        # Calculate distance to each cone
+        cones = [
+            (1, self._cone_layout.cone1),
+            (2, self._cone_layout.cone2),
+            (3, self._cone_layout.cone3),
+        ]
 
         min_dist = float('inf')
         nearest_id = -1
 
-        for cone in self._cone_roles:
-            # field_x and field_y are actually pixel coordinates from JSON (px, py)
+        for cone_id, (cone_x, cone_y) in cones:
             dist = np.sqrt(
-                (cone.field_x - ball_pos[0])**2 +
-                (cone.field_y - ball_pos[1])**2
+                (cone_x - ball_pos[0])**2 +
+                (cone_y - ball_pos[1])**2
             )
             if dist < min_dist:
                 min_dist = dist
-                nearest_id = cone.cone_id
+                nearest_id = cone_id
 
         return nearest_id, min_dist
 
@@ -1044,21 +1247,21 @@ def detect_ball_control(
     video_path: Optional[str] = None
 ) -> DetectionResult:
     """
-    Convenience function for Figure-8 drill detection.
+    Convenience function for Triple Cone drill detection.
 
     Args:
         ball_df: Ball detection DataFrame
         pose_df: Pose keypoint DataFrame
         cone_df: Cone detection DataFrame
-        config: Optional AppConfig (defaults to Figure-8 config)
+        config: Optional AppConfig (defaults to Triple Cone config)
         fps: Video FPS
         parquet_dir: Path to parquet directory for loading manual cone annotations
         video_path: Path to video file for getting actual video dimensions
 
     Returns:
-        DetectionResult with Figure-8 specific metrics
+        DetectionResult with Triple Cone specific metrics
     """
     if config is None:
-        config = AppConfig.for_figure8()
+        config = AppConfig.for_triple_cone()
     detector = BallControlDetector(config, parquet_dir=parquet_dir, video_path=video_path)
     return detector.detect(ball_df, pose_df, cone_df, fps)

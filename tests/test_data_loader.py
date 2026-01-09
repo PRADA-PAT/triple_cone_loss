@@ -8,7 +8,7 @@ from pathlib import Path
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from f8_loss.detection.data_loader import (
+from triple_cone_loss.detection.data_loader import (
     load_parquet_data,
     load_all_data,
     extract_ankle_positions,
@@ -114,6 +114,8 @@ class TestGetClosestAnklePerFrame:
 
         ball_df = pd.DataFrame({
             'frame_id': [0, 1],
+            'center_x': [120.0, 180.0],      # Pixel coords (closer to left_ankle=100, right_ankle=200)
+            'center_y': [100.0, 100.0],      # Pixel coords
             'field_center_x': [12.0, 18.0],  # Frame 0: closer to left, Frame 1: closer to right
             'field_center_y': [10.0, 10.0],
         })
@@ -137,6 +139,8 @@ class TestGetClosestAnklePerFrame:
 
         ball_df = pd.DataFrame({
             'frame_id': [0],
+            'center_x': [150.0],             # Pixel coords (midpoint between ankles)
+            'center_y': [100.0],             # Pixel coords
             'field_center_x': [15.0],
             'field_center_y': [10.0],
         })

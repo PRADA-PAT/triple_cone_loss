@@ -12,9 +12,9 @@ class TestImports:
 
     def test_import_config_module(self):
         """Test config module imports from detection subpackage."""
-        from f8_loss.detection.config import (
+        from triple_cone_loss.detection.config import (
             AppConfig,
-            Figure8DrillConfig,
+            TripleConeDrillConfig,
             DetectionConfig,
             PathConfig,
             VisualizationConfig,
@@ -25,7 +25,7 @@ class TestImports:
 
     def test_import_data_structures(self):
         """Test data structures imports from detection subpackage."""
-        from f8_loss.detection.data_structures import (
+        from triple_cone_loss.detection.data_structures import (
             ControlState,
             EventType,
             FrameData,
@@ -37,7 +37,7 @@ class TestImports:
 
     def test_import_from_package(self):
         """Test importing from package __init__ (backwards compatibility)."""
-        from f8_loss import (
+        from triple_cone_loss import (
             AppConfig,
             FrameData,
             LossEvent,
@@ -48,14 +48,14 @@ class TestImports:
 
     def test_import_from_detection_subpackage(self):
         """Test importing from detection subpackage."""
-        from f8_loss.detection import (
+        from triple_cone_loss.detection import (
             BallControlDetector,
-            Figure8ConeDetector,
+            TripleConeConeDetector,
             AppConfig,
             ControlState,
         )
         assert BallControlDetector is not None
-        assert Figure8ConeDetector is not None
+        assert TripleConeConeDetector is not None
 
 
 class TestConfigDataclasses:
@@ -63,24 +63,24 @@ class TestConfigDataclasses:
 
     def test_app_config_defaults(self):
         """Test AppConfig has sensible defaults."""
-        from f8_loss.detection.config import AppConfig
+        from triple_cone_loss.detection.config import AppConfig
 
         config = AppConfig()
         assert config.fps == 30.0
         assert config.verbose is False
-        assert config.drill.expected_cone_count == 5  # Figure-8 has 5 cones
+        assert config.drill.expected_cone_count == 3  # Triple Cone has 3 cones
         assert config.detection.control_radius == 120.0
 
     def test_drill_config_gates(self):
-        """Test Figure8DrillConfig gate definitions."""
-        from f8_loss.detection.config import Figure8DrillConfig
+        """Test TripleConeDrillConfig gate definitions."""
+        from triple_cone_loss.detection.config import TripleConeDrillConfig
 
-        drill = Figure8DrillConfig()
-        assert drill.expected_cone_count == 5
+        drill = TripleConeDrillConfig()
+        assert drill.expected_cone_count == 3
 
     def test_detection_config_thresholds(self):
         """Test DetectionConfig threshold values."""
-        from f8_loss.detection.config import DetectionConfig, DetectionMode
+        from triple_cone_loss.detection.config import DetectionConfig, DetectionMode
 
         config = DetectionConfig()
         assert config.loss_distance_threshold == 200.0
@@ -88,7 +88,7 @@ class TestConfigDataclasses:
 
     def test_visualization_config_colors(self):
         """Test VisualizationConfig color tuples."""
-        from f8_loss.detection.config import VisualizationConfig
+        from triple_cone_loss.detection.config import VisualizationConfig
 
         config = VisualizationConfig()
         assert len(config.ball_color) == 3  # BGR tuple
@@ -100,7 +100,7 @@ class TestDataStructures:
 
     def test_control_state_enum(self):
         """Test ControlState enum values."""
-        from f8_loss.detection.data_structures import ControlState
+        from triple_cone_loss.detection.data_structures import ControlState
 
         assert ControlState.CONTROLLED.value == "controlled"
         assert ControlState.LOST.value == "lost"
@@ -108,14 +108,14 @@ class TestDataStructures:
 
     def test_event_type_enum(self):
         """Test EventType enum values."""
-        from f8_loss.detection.data_structures import EventType
+        from triple_cone_loss.detection.data_structures import EventType
 
         assert EventType.LOSS_DISTANCE.value == "loss_distance"
         assert EventType.RECOVERY.value == "recovery"
 
     def test_frame_data_creation(self):
         """Test FrameData instantiation."""
-        from f8_loss.detection.data_structures import FrameData, ControlState
+        from triple_cone_loss.detection.data_structures import FrameData, ControlState
 
         frame = FrameData(
             frame_id=0,
@@ -148,7 +148,7 @@ class TestDataStructures:
 
     def test_loss_event_creation(self):
         """Test LossEvent instantiation and properties."""
-        from f8_loss.detection.data_structures import LossEvent, EventType
+        from triple_cone_loss.detection.data_structures import LossEvent, EventType
 
         event = LossEvent(
             event_id=1,
@@ -175,7 +175,7 @@ class TestDataStructures:
 
     def test_detection_result_summary(self):
         """Test DetectionResult summary calculation."""
-        from f8_loss.detection.data_structures import (
+        from triple_cone_loss.detection.data_structures import (
             DetectionResult, LossEvent, EventType
         )
 

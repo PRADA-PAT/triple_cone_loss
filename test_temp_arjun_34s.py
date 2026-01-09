@@ -9,20 +9,20 @@ sys.path.insert(0, '/Users/pradyumn/Desktop/FOOTBALL data /AIM')
 
 from pathlib import Path
 import pandas as pd
-from f8_loss.detection import BallControlDetector, AppConfig
-from f8_loss.detection.data_loader import load_cone_annotations
-from f8_loss.detection.turning_zones import create_turning_zones
+from triple_cone_loss.detection import BallControlDetector, AppConfig
+from triple_cone_loss.detection.data_loader import load_cone_annotations
+from triple_cone_loss.detection.turning_zones import create_turning_zones
 
 # Setup paths
-parquet_dir = Path('/Users/pradyumn/Desktop/FOOTBALL data /AIM/f8_loss/video_detection_pose_ball_cones/arjun_mital_f8')
+parquet_dir = Path('/Users/pradyumn/Desktop/FOOTBALL data /AIM/triple_cone_loss/video_detection_pose_ball_cones/arjun_mital_tc')
 
 # Load data
 print("=" * 80)
-print("Loading arjun_mital_f8 data...")
+print("Loading arjun_mital_tc data...")
 print("=" * 80)
 
-ball_df = pd.read_parquet(parquet_dir / 'arjun_mital_f8_football.parquet')
-pose_df = pd.read_parquet(parquet_dir / 'arjun_mital_f8_pose.parquet')
+ball_df = pd.read_parquet(parquet_dir / 'arjun_mital_tc_football.parquet')
+pose_df = pd.read_parquet(parquet_dir / 'arjun_mital_tc_pose.parquet')
 
 # Get frame rate info
 fps = 30  # Assume 30fps
@@ -120,7 +120,7 @@ print("RUNNING FULL DETECTION...")
 print("=" * 80)
 
 # Run full detection
-config = AppConfig.for_figure8()
+config = AppConfig.for_triple_cone()
 detector = BallControlDetector(config)
 
 result = detector.detect(

@@ -1,5 +1,5 @@
 """
-Testing module for Figure-8 Ball Control Detection validation.
+Testing module for Triple Cone Ball Control Detection validation.
 
 Compares detected loss events against manually annotated ground truth
 with configurable time tolerance.
@@ -32,12 +32,13 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Constants
-# Default tolerance increased to 1.5s to account for human annotation imprecision.
-# Manual video annotation is typically off by 1-2 seconds due to:
+# Default frame tolerance to account for human annotation imprecision.
+# 45 frames ≈ 1.5s at 30fps. Manual video annotation is typically off by 1-2 seconds due to:
 # - Subjective perception of when "loss" starts
 # - Reaction time delay when marking timestamps
 # - Frame-by-frame detection vs. human perception
-DEFAULT_TOLERANCE = 1.5  # seconds
+DEFAULT_FRAME_TOLERANCE = 45  # frames (≈1.5s at 30fps)
+DEFAULT_TOLERANCE = 1.5  # seconds (legacy, for backwards compatibility)
 
 
 @dataclass
@@ -46,6 +47,10 @@ class MatchedEvent:
     detected_time: float
     ground_truth_time: float
     time_difference: float  # detected - ground_truth
+    # Frame-based matching (primary for debugging)
+    detected_frame: Optional[int] = None
+    ground_truth_frame: Optional[int] = None
+    frame_difference: Optional[int] = None  # detected - ground_truth
     event_type: Optional[EventType] = None  # Type of detection that matched
     loss_event: Optional[LossEvent] = None  # Full event object for detailed info
 
@@ -71,6 +76,10 @@ class DetectedEventInfo:
     event_type: EventType
     loss_event: LossEvent
     duration_seconds: float = 0.0
+    # Frame-based info (primary for debugging)
+    start_frame: Optional[int] = None
+    end_frame: Optional[int] = None
+    duration_frames: int = 0
 
     @property
     def event_type_name(self) -> str:
@@ -86,16 +95,23 @@ class DetectedEventInfo:
 
 
 @dataclass
+class GroundTruthEvent:
+    """A single ground truth event with frame and timestamp."""
+    frame: Optional[int]
+    timestamp: Optional[float]
+
+
+@dataclass
 class TestResult:
     """Results from comparing detection to ground truth for one player."""
     player_name: str
 
-    # Ground truth info
-    ground_truth_events: List[float]  # List of start timestamps
+    # Ground truth info (with frames)
+    ground_truth_events: List[GroundTruthEvent]  # List of GT events with frame+timestamp
     ground_truth_count: int
 
     # Detection info
-    detected_events: List[float]  # List of start timestamps
+    detected_events: List[float]  # List of start timestamps (legacy)
     detected_count: int
 
     # Full detected events with type info
@@ -104,7 +120,7 @@ class TestResult:
     # Matching results
     true_positives: List[MatchedEvent] = field(default_factory=list)
     false_positives: List[DetectedEventInfo] = field(default_factory=list)  # Detected but not in GT
-    false_negatives: List[float] = field(default_factory=list)  # GT but not detected
+    false_negatives: List[GroundTruthEvent] = field(default_factory=list)  # GT but not detected
 
     # Event type breakdown (computed in __post_init__)
     event_type_counts: Dict[str, int] = field(default_factory=dict)
@@ -212,7 +228,7 @@ class OverallTestSummary:
                 self.fp_by_type[type_name] = self.fp_by_type.get(type_name, 0) + count
 
 
-def load_ground_truth(csv_path: str) -> Dict[str, List[float]]:
+def load_ground_truth(csv_path: str) -> Dict[str, List[GroundTruthEvent]]:
     """
     Load ground truth annotations from CSV file.
 
@@ -220,16 +236,16 @@ def load_ground_truth(csv_path: str) -> Dict[str, List[float]]:
         csv_path: Path to ground_truth.csv
 
     Returns:
-        Dict mapping player_name -> list of loss event start times (sorted)
+        Dict mapping player_name -> list of GroundTruthEvent (sorted by frame)
 
     Example:
         {
-            'abdullah_nasib': [12.5, 25.0, 40.1],
-            'ali_buraq': [8.3, 15.7],
+            'abdullah_nasib': [GroundTruthEvent(375, 12.5), GroundTruthEvent(750, 25.0)],
+            'ali_buraq': [GroundTruthEvent(249, 8.3)],
             'archie_post': [],  # No events
         }
     """
-    ground_truth: Dict[str, List[float]] = {}
+    ground_truth: Dict[str, List[GroundTruthEvent]] = {}
 
     with open(csv_path, 'r', newline='') as f:
         reader = csv.DictReader(f)
@@ -248,18 +264,35 @@ def load_ground_truth(csv_path: str) -> Dict[str, List[float]]:
             if event_number == 0:
                 continue
 
-            # Parse start time
+            # Parse frame number (primary identifier)
+            start_frame: Optional[int] = None
+            start_frame_str = row.get('loss_start_frame', '').strip()
+            if start_frame_str:
+                try:
+                    start_frame = int(start_frame_str)
+                except ValueError:
+                    logger.warning(f"Invalid frame for {player_name}: {start_frame_str}")
+
+            # Parse start time (secondary, for human readability)
+            start_time: Optional[float] = None
             start_time_str = row.get('loss_start_time', '').strip()
             if start_time_str:
                 try:
                     start_time = float(start_time_str)
-                    ground_truth[player_name].append(start_time)
                 except ValueError:
                     logger.warning(f"Invalid time for {player_name}: {start_time_str}")
 
-    # Sort times for each player
+            # Only add if we have at least frame or time
+            if start_frame is not None or start_time is not None:
+                ground_truth[player_name].append(GroundTruthEvent(
+                    frame=start_frame,
+                    timestamp=start_time
+                ))
+
+    # Sort by frame (primary) or timestamp (fallback)
     for player in ground_truth:
-        ground_truth[player].sort()
+        ground_truth[player].sort(key=lambda e: (e.frame if e.frame is not None else float('inf'),
+                                                   e.timestamp if e.timestamp is not None else float('inf')))
 
     logger.info(f"Loaded ground truth for {len(ground_truth)} players")
     return ground_truth
@@ -267,29 +300,29 @@ def load_ground_truth(csv_path: str) -> Dict[str, List[float]]:
 
 def compare_events(
     detected: List[LossEvent],
-    ground_truth: List[float],
-    tolerance: float = DEFAULT_TOLERANCE
-) -> Tuple[List[MatchedEvent], List[DetectedEventInfo], List[float]]:
+    ground_truth: List[GroundTruthEvent],
+    frame_tolerance: int = DEFAULT_FRAME_TOLERANCE
+) -> Tuple[List[MatchedEvent], List[DetectedEventInfo], List[GroundTruthEvent]]:
     """
-    Compare detected events against ground truth with tolerance.
+    Compare detected events against ground truth using frame-based matching.
 
     Uses greedy matching: for each ground truth event, find the closest
-    unmatched detection within tolerance.
+    unmatched detection within frame tolerance.
 
     Args:
         detected: List of detected LossEvent objects
-        ground_truth: List of ground truth start timestamps (sorted)
-        tolerance: Maximum time difference for a match (default 0.5s)
+        ground_truth: List of GroundTruthEvent objects (sorted by frame)
+        frame_tolerance: Maximum frame difference for a match (default 45 frames)
 
     Returns:
         Tuple of (true_positives, false_positives, false_negatives)
-        - true_positives: List of MatchedEvent with matched pairs and event types
+        - true_positives: List of MatchedEvent with matched pairs, frames, and event types
         - false_positives: List of DetectedEventInfo not matching any GT
-        - false_negatives: List of GT times not matched by any detection
+        - false_negatives: List of GroundTruthEvent not matched by any detection
     """
-    # Sort detected events by timestamp and create index mapping
-    sorted_detected = sorted(detected, key=lambda e: e.start_timestamp)
-    gt_times = sorted(ground_truth)
+    # Sort detected events by frame
+    sorted_detected = sorted(detected, key=lambda e: e.start_frame)
+    gt_events = sorted(ground_truth, key=lambda e: (e.frame if e.frame is not None else float('inf')))
 
     # Track which detections have been matched
     matched_detections = set()
@@ -298,7 +331,7 @@ def compare_events(
     true_positives: List[MatchedEvent] = []
 
     # For each ground truth event, find best matching detection
-    for gt_idx, gt_time in enumerate(gt_times):
+    for gt_idx, gt_event in enumerate(gt_events):
         best_match_idx = None
         best_match_diff = float('inf')
 
@@ -306,20 +339,43 @@ def compare_events(
             if det_idx in matched_detections:
                 continue
 
-            diff = abs(event.start_timestamp - gt_time)
-            if diff <= tolerance and diff < best_match_diff:
-                best_match_idx = det_idx
-                best_match_diff = diff
+            # Use frame-based matching if GT has frame, otherwise fallback to time
+            if gt_event.frame is not None:
+                diff = abs(event.start_frame - gt_event.frame)
+                if diff <= frame_tolerance and diff < best_match_diff:
+                    best_match_idx = det_idx
+                    best_match_diff = diff
+            elif gt_event.timestamp is not None:
+                # Fallback to time-based matching (convert tolerance: 45 frames ≈ 1.5s at 30fps)
+                time_tolerance = frame_tolerance / 30.0
+                diff = abs(event.start_timestamp - gt_event.timestamp)
+                if diff <= time_tolerance and diff < best_match_diff:
+                    best_match_idx = det_idx
+                    best_match_diff = diff
 
         if best_match_idx is not None:
-            # Found a match - include full event info
+            # Found a match - include full event info with frames
             matched_event = sorted_detected[best_match_idx]
             matched_detections.add(best_match_idx)
             matched_gt.add(gt_idx)
+
+            # Calculate frame difference
+            frame_diff = None
+            if gt_event.frame is not None:
+                frame_diff = matched_event.start_frame - gt_event.frame
+
+            # Calculate time difference
+            time_diff = 0.0
+            gt_time = gt_event.timestamp if gt_event.timestamp is not None else 0.0
+            time_diff = matched_event.start_timestamp - gt_time
+
             true_positives.append(MatchedEvent(
                 detected_time=matched_event.start_timestamp,
                 ground_truth_time=gt_time,
-                time_difference=matched_event.start_timestamp - gt_time,
+                time_difference=time_diff,
+                detected_frame=matched_event.start_frame,
+                ground_truth_frame=gt_event.frame,
+                frame_difference=frame_diff,
                 event_type=matched_event.event_type,
                 loss_event=matched_event
             ))
@@ -332,12 +388,15 @@ def compare_events(
                 timestamp=event.start_timestamp,
                 event_type=event.event_type,
                 loss_event=event,
-                duration_seconds=event.duration_seconds
+                duration_seconds=event.duration_seconds,
+                start_frame=event.start_frame,
+                end_frame=event.end_frame,
+                duration_frames=event.duration_frames
             ))
 
     # False negatives: GT events not matched by any detection
     false_negatives = [
-        gt_times[i] for i in range(len(gt_times))
+        gt_events[i] for i in range(len(gt_events))
         if i not in matched_gt
     ]
 
@@ -347,8 +406,8 @@ def compare_events(
 def create_test_result(
     player_name: str,
     detected_events: List[LossEvent],
-    ground_truth_times: List[float],
-    tolerance: float = DEFAULT_TOLERANCE
+    ground_truth_events: List[GroundTruthEvent],
+    frame_tolerance: int = DEFAULT_FRAME_TOLERANCE
 ) -> TestResult:
     """
     Create a TestResult for a single player.
@@ -356,8 +415,8 @@ def create_test_result(
     Args:
         player_name: Player identifier
         detected_events: List of detected LossEvent objects
-        ground_truth_times: List of ground truth timestamps
-        tolerance: Time tolerance for matching
+        ground_truth_events: List of GroundTruthEvent objects (with frame+timestamp)
+        frame_tolerance: Frame tolerance for matching (default 45 frames)
 
     Returns:
         TestResult with all metrics calculated including event type breakdown
@@ -365,13 +424,13 @@ def create_test_result(
     detected_times = [e.start_timestamp for e in detected_events]
 
     true_positives, false_positives, false_negatives = compare_events(
-        detected_events, ground_truth_times, tolerance
+        detected_events, ground_truth_events, frame_tolerance
     )
 
     return TestResult(
         player_name=player_name,
-        ground_truth_events=ground_truth_times,
-        ground_truth_count=len(ground_truth_times),
+        ground_truth_events=ground_truth_events,
+        ground_truth_count=len(ground_truth_events),
         detected_events=detected_times,
         detected_count=len(detected_times),
         all_detected_events=detected_events,  # Store full events for type breakdown
@@ -384,7 +443,7 @@ def create_test_result(
 def generate_report(
     results: Dict[str, TestResult],
     summary: OverallTestSummary,
-    tolerance: float = DEFAULT_TOLERANCE
+    frame_tolerance: int = DEFAULT_FRAME_TOLERANCE
 ) -> str:
     """
     Generate formatted test report string with detailed event type breakdown.
@@ -392,7 +451,7 @@ def generate_report(
     Args:
         results: Dict of player_name -> TestResult
         summary: Overall aggregated summary
-        tolerance: Tolerance used for matching
+        frame_tolerance: Frame tolerance used for matching
 
     Returns:
         Formatted report string ready for console/file output
@@ -401,9 +460,9 @@ def generate_report(
 
     # Header
     lines.append("=" * 80)
-    lines.append("FIGURE-8 BALL CONTROL DETECTION - DETAILED TEST RESULTS")
+    lines.append("TRIPLE CONE BALL CONTROL DETECTION - DETAILED TEST RESULTS")
     lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(f"Tolerance: +/- {tolerance}s")
+    lines.append(f"Frame Tolerance: +/- {frame_tolerance} frames (~{frame_tolerance/30.0:.1f}s at 30fps)")
     lines.append("=" * 80)
     lines.append("")
 
@@ -432,16 +491,33 @@ def generate_report(
 
         lines.append("")
 
-        # True positives with event type details
+        # True positives with frame details
         if result.true_positives:
             lines.append(f"  ✓ TRUE POSITIVES: {len(result.true_positives)}")
             lines.append("  " + "-" * 56)
             for m in result.true_positives:
                 event = m.loss_event
-                duration_str = f"{event.duration_seconds:.1f}s" if event else "?"
+                # Format GT frame/time
+                gt_str = f"frame {m.ground_truth_frame}" if m.ground_truth_frame is not None else "frame ?"
+                if m.ground_truth_time > 0:
+                    gt_str += f" ({m.ground_truth_time:.1f}s)"
+                # Format detected frame/time
+                det_str = f"frame {m.detected_frame}" if m.detected_frame is not None else "frame ?"
+                det_str += f" ({m.detected_time:.1f}s)"
+                # Format duration
+                dur_frames = event.duration_frames if event else 0
+                dur_secs = event.duration_seconds if event else 0.0
+                dur_str = f"{dur_frames} frames ({dur_secs:.1f}s)"
+                # Format difference
+                diff_str = ""
+                if m.frame_difference is not None:
+                    sign = "+" if m.frame_difference >= 0 else ""
+                    diff_str = f" Δ: {sign}{m.frame_difference} frames"
                 lines.append(
-                    f"    GT: {m.ground_truth_time:.1f}s → Detected: {m.detected_time:.1f}s "
-                    f"[{m.event_type_name}] (duration: {duration_str})"
+                    f"    GT: {gt_str} → Detected: {det_str} [{m.event_type_name}]"
+                )
+                lines.append(
+                    f"        {diff_str}, duration: {dur_str}"
                 )
             # TP by type
             if result.tp_by_type:
@@ -452,14 +528,16 @@ def generate_report(
 
         lines.append("")
 
-        # False positives with event type details
+        # False positives with frame details
         if result.false_positives:
             lines.append(f"  ✗ FALSE POSITIVES: {len(result.false_positives)} (detected but not in ground truth)")
             lines.append("  " + "-" * 56)
             for fp in result.false_positives:
+                frame_str = f"frame {fp.start_frame}" if fp.start_frame is not None else "frame ?"
+                dur_str = f"{fp.duration_frames} frames ({fp.duration_seconds:.1f}s)"
                 lines.append(
-                    f"    @ {fp.timestamp:.1f}s [{fp.event_type_name}] "
-                    f"(duration: {fp.duration_seconds:.1f}s)"
+                    f"    @ {frame_str} ({fp.timestamp:.1f}s) [{fp.event_type_name}] "
+                    f"duration: {dur_str}"
                 )
             # FP by type
             if result.fp_by_type:
@@ -470,12 +548,14 @@ def generate_report(
 
         lines.append("")
 
-        # False negatives
+        # False negatives with frame details
         if result.false_negatives:
             lines.append(f"  ✗ FALSE NEGATIVES: {len(result.false_negatives)} (in ground truth but not detected)")
             lines.append("  " + "-" * 56)
-            fn_strs = [f"    @ {t:.1f}s (MISSED)" for t in result.false_negatives]
-            lines.extend(fn_strs)
+            for fn in result.false_negatives:
+                frame_str = f"frame {fn.frame}" if fn.frame is not None else "frame ?"
+                time_str = f" ({fn.timestamp:.1f}s)" if fn.timestamp is not None else ""
+                lines.append(f"    @ {frame_str}{time_str} (MISSED)")
         else:
             lines.append(f"  ✗ FALSE NEGATIVES: 0")
 
@@ -676,9 +756,9 @@ def save_events_csv(
     """
     Save detailed event-level results as CSV - one row per event.
 
-    CSV columns:
-        player_name, source, timestamp_s, event_type, duration_s,
-        result, matched_timestamp_s, time_diff_s
+    CSV columns (with frame numbers for debugging):
+        player_name, source, frame, timestamp_s, event_type, duration_frames,
+        duration_s, result, matched_frame, matched_timestamp_s, frame_diff, time_diff_s
 
     Args:
         results: Dict of player_name -> TestResult
@@ -693,53 +773,76 @@ def save_events_csv(
     with open(filepath, 'w', newline='') as f:
         writer = csv.writer(f)
 
-        # Header
+        # Header with frame columns
         writer.writerow([
-            'player_name', 'source', 'timestamp_s', 'event_type',
-            'duration_s', 'result', 'matched_timestamp_s', 'time_diff_s'
+            'player_name', 'source', 'frame', 'timestamp_s', 'event_type',
+            'duration_frames', 'duration_s', 'result', 'matched_frame',
+            'matched_timestamp_s', 'frame_diff', 'time_diff_s'
         ])
 
         for player_name in sorted(results.keys()):
             result = results[player_name]
 
-            # Track which GT times were matched
-            matched_gt_times = {m.ground_truth_time for m in result.true_positives}
+            # Track which GT frames were matched
+            matched_gt_frames = {m.ground_truth_frame for m in result.true_positives}
 
             # Ground truth events
-            for gt_time in result.ground_truth_events:
-                if gt_time in matched_gt_times:
+            for gt_event in result.ground_truth_events:
+                if gt_event.frame in matched_gt_frames:
                     # Find the matching detection
                     match = next(m for m in result.true_positives
-                                 if m.ground_truth_time == gt_time)
+                                 if m.ground_truth_frame == gt_event.frame)
                     writer.writerow([
-                        player_name, 'ground_truth', f"{gt_time:.1f}", '',
-                        '', 'TP', f"{match.detected_time:.1f}",
+                        player_name, 'ground_truth',
+                        gt_event.frame if gt_event.frame is not None else '',
+                        f"{gt_event.timestamp:.1f}" if gt_event.timestamp is not None else '',
+                        '',  # event_type
+                        '',  # duration_frames
+                        '',  # duration_s
+                        'TP',
+                        match.detected_frame if match.detected_frame is not None else '',
+                        f"{match.detected_time:.1f}",
+                        match.frame_difference if match.frame_difference is not None else '',
                         f"{match.time_difference:.1f}"
                     ])
                 else:
                     # False negative - missed
                     writer.writerow([
-                        player_name, 'ground_truth', f"{gt_time:.1f}", '',
-                        '', 'FN', '', ''
+                        player_name, 'ground_truth',
+                        gt_event.frame if gt_event.frame is not None else '',
+                        f"{gt_event.timestamp:.1f}" if gt_event.timestamp is not None else '',
+                        '', '', '', 'FN', '', '', '', ''
                     ])
 
             # Detected events - True positives
             for match in result.true_positives:
                 event = match.loss_event
+                dur_frames = event.duration_frames if event else ''
+                dur_secs = f"{event.duration_seconds:.1f}" if event else ''
                 writer.writerow([
-                    player_name, 'detected', f"{match.detected_time:.1f}",
+                    player_name, 'detected',
+                    match.detected_frame if match.detected_frame is not None else '',
+                    f"{match.detected_time:.1f}",
                     match.event_type_name,
-                    f"{event.duration_seconds:.1f}" if event else '',
-                    'TP', f"{match.ground_truth_time:.1f}",
+                    dur_frames,
+                    dur_secs,
+                    'TP',
+                    match.ground_truth_frame if match.ground_truth_frame is not None else '',
+                    f"{match.ground_truth_time:.1f}",
+                    match.frame_difference if match.frame_difference is not None else '',
                     f"{match.time_difference:.1f}"
                 ])
 
             # Detected events - False positives
             for fp in result.false_positives:
                 writer.writerow([
-                    player_name, 'detected', f"{fp.timestamp:.1f}",
-                    fp.event_type_name, f"{fp.duration_seconds:.1f}",
-                    'FP', '', ''
+                    player_name, 'detected',
+                    fp.start_frame if fp.start_frame is not None else '',
+                    f"{fp.timestamp:.1f}",
+                    fp.event_type_name,
+                    fp.duration_frames,
+                    f"{fp.duration_seconds:.1f}",
+                    'FP', '', '', '', ''
                 ])
 
     logger.info(f"Events CSV saved to {filepath}")

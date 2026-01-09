@@ -1,5 +1,5 @@
 """
-Manual Cone Annotation Tool for Figure-8 Drills.
+Manual Cone Annotation Tool for Triple Cone Drills.
 
 Provides an OpenCV-based GUI to manually annotate cone bounding boxes
 in video frames, replacing unreliable automatic cone detection.
@@ -78,7 +78,7 @@ class ConeAnnotator:
 
     Features:
     - Click and drag to draw bounding boxes
-    - Visual guide showing Figure-8 cone layout
+    - Visual guide showing Triple Cone cone layout
     """
 
     def __init__(self, video_path: str, output_dir: str):
@@ -206,7 +206,7 @@ class ConeAnnotator:
         cv2.rectangle(frame, (dx, dy), (dx + dw, dy + dh), (100, 100, 100), 1)
 
         # Title
-        cv2.putText(frame, "FIGURE-8 CONE LAYOUT", (dx + 10, dy + 25),
+        cv2.putText(frame, "TRIPLE CONE LAYOUT", (dx + 10, dy + 25),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         # Direction arrow (right to left)
@@ -553,11 +553,11 @@ def get_annotation_status(parquet_base: str, video_dir: str, players: dict) -> D
 
     status = {}
     for player, video_file in players.items():
-        annotation_file_f8 = parquet_base / f"{player}_f8" / "cone_annotations.json"
+        annotation_file_tc = parquet_base / f"{player}_tc" / "cone_annotations.json"
         annotation_file = parquet_base / player / "cone_annotations.json"
         video_path = video_dir / video_file
 
-        if annotation_file_f8.exists() or annotation_file.exists():
+        if annotation_file_tc.exists() or annotation_file.exists():
             status[player] = "annotated"
         elif video_path.exists():
             status[player] = "pending"
