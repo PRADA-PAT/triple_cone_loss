@@ -105,11 +105,11 @@ class BallControlDetector:
         # Turning zones (3 zones for CONE1, CONE2, CONE3)
         self._turning_zones: Optional[TripleConeZoneSet] = None
 
-        # Ball-behind detection config (momentum-based)
+        # Ball-behind detection config (momentum-based) - scaled for 720p
         # NOTE: Must match BALL_POSITION_THRESHOLD in video/annotate_with_json_cones.py
-        self._behind_threshold = 20.0  # Pixels - ball must be this far behind hip
+        self._behind_threshold = 9.0  # Pixels - ball must be this far behind hip (720p)
         self._behind_sustained_frames = 10  # ~0.33 sec at 30fps to confirm loss
-        self._movement_threshold = 3.0  # Min hip movement to determine direction
+        self._movement_threshold = 1.4  # Min hip movement to determine direction (720p)
 
         # Intention-based (face direction) detection config
         # NOTE: Must match thresholds in video/annotate_triple_cone.py
@@ -743,14 +743,14 @@ class BallControlDetector:
         # ============================================================
         # Priority: This is checked first as it's the most severe loss type.
 
-        EDGE_MARGIN = 50
+        # Thresholds scaled for 720p (1280px width)
+        EDGE_MARGIN = 23
         SCREEN_RIGHT_THRESHOLD = self._video_width - EDGE_MARGIN
         SCREEN_LEFT_THRESHOLD = EDGE_MARGIN
-        APPROACHING_RIGHT_THRESHOLD = self._video_width - 100
-        APPROACHING_LEFT_THRESHOLD = 100
-        # Use pixel velocity for stuck detection (5 px/frame threshold)
-        # Previous threshold of 0.5 was for field coordinates which are much smaller
-        STUCK_VELOCITY_THRESHOLD_PIXEL = 5.0
+        APPROACHING_RIGHT_THRESHOLD = self._video_width - 45
+        APPROACHING_LEFT_THRESHOLD = 45
+        # Use pixel velocity for stuck detection (scaled for 720p)
+        STUCK_VELOCITY_THRESHOLD_PIXEL = 2.3
         MIN_TIMESTAMP = 3.0
         FRAMES_TO_CHECK = 5
 
@@ -827,7 +827,7 @@ class BallControlDetector:
                     # Calculate ball-hip distance to check recovery
                     ball_hip_dist = abs(ball_pixel_pos[0] - hip_pixel_pos[0])
                     # Require ball to be close enough to hip to recover
-                    RECOVERY_DISTANCE_THRESHOLD = 80.0  # pixels
+                    RECOVERY_DISTANCE_THRESHOLD = 36.0  # pixels (720p)
                     if ball_hip_dist > RECOVERY_DISTANCE_THRESHOLD:
                         # Ball still too far - continue LOST state
                         logger.debug(
@@ -1018,10 +1018,11 @@ class BallControlDetector:
             processed_frames: Set of frame IDs already processed in main loop
             fps: Video FPS for timestamp calculation
         """
-        EDGE_MARGIN = 50
+        # Thresholds scaled for 720p (1280px width)
+        EDGE_MARGIN = 23
         SCREEN_RIGHT_THRESHOLD = self._video_width - EDGE_MARGIN
         SCREEN_LEFT_THRESHOLD = EDGE_MARGIN
-        STUCK_VELOCITY_THRESHOLD = 5.0
+        STUCK_VELOCITY_THRESHOLD = 2.3
         MIN_CONSECUTIVE_FRAMES = 5
         MIN_TIMESTAMP = 3.0
 

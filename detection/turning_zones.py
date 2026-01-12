@@ -191,9 +191,9 @@ class TripleConeZoneConfig:
         cone2_zone_rotation: Rotation of CONE2 zone ellipse (degrees)
         cone3_zone_rotation: Rotation of CONE3 zone ellipse (degrees)
     """
-    cone1_zone_radius: float = 150.0  # HOME cone
-    cone2_zone_radius: float = 150.0  # CENTER cone
-    cone3_zone_radius: float = 150.0  # RIGHT cone
+    cone1_zone_radius: float = 68.0  # HOME cone (720p)
+    cone2_zone_radius: float = 68.0  # CENTER cone (720p)
+    cone3_zone_radius: float = 68.0  # RIGHT cone (720p)
     stretch_x: float = 1.0
     stretch_y: float = 5.0  # Heavy horizontal stretch for side-view camera
     cone1_zone_rotation: float = 0.0
@@ -217,20 +217,20 @@ class TripleConeZoneConfig:
 
     @classmethod
     def small_zones(cls) -> 'TripleConeZoneConfig':
-        """Configuration with smaller, tighter zones."""
+        """Configuration with smaller, tighter zones (720p)."""
         return cls(
-            cone1_zone_radius=80.0,
-            cone2_zone_radius=80.0,
-            cone3_zone_radius=80.0
+            cone1_zone_radius=36.0,
+            cone2_zone_radius=36.0,
+            cone3_zone_radius=36.0
         )
 
     @classmethod
     def large_zones(cls) -> 'TripleConeZoneConfig':
-        """Configuration with larger, more generous zones."""
+        """Configuration with larger, more generous zones (720p)."""
         return cls(
-            cone1_zone_radius=200.0,
-            cone2_zone_radius=200.0,
-            cone3_zone_radius=200.0
+            cone1_zone_radius=91.0,
+            cone2_zone_radius=91.0,
+            cone3_zone_radius=91.0
         )
 
 
@@ -315,9 +315,9 @@ class TripleConeZoneSet:
         """Create from dictionary (JSON deserialization)."""
         config_data = data.get('config', {})
         config = TripleConeZoneConfig(
-            cone1_zone_radius=config_data.get('cone1_zone_radius', 150.0),
-            cone2_zone_radius=config_data.get('cone2_zone_radius', 150.0),
-            cone3_zone_radius=config_data.get('cone3_zone_radius', 150.0),
+            cone1_zone_radius=config_data.get('cone1_zone_radius', 68.0),  # 720p default
+            cone2_zone_radius=config_data.get('cone2_zone_radius', 68.0),  # 720p default
+            cone3_zone_radius=config_data.get('cone3_zone_radius', 68.0),  # 720p default
             stretch_x=config_data.get('stretch_x', 1.0),
             stretch_y=config_data.get('stretch_y', 5.0),
         )

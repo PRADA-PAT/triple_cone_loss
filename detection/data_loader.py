@@ -1,18 +1,16 @@
 """
 Data loading module for Ball Control Detection System.
 
-Handles loading parquet files, JSON cone annotations, and preprocessing for analysis.
+Handles loading parquet files and preprocessing for analysis.
 Only uses ankle keypoints (left_ankle, right_ankle) for stability.
 
 Key functions:
 - load_triple_cone_layout_from_parquet(): Load 3-cone positions from parquet
-- load_triple_cone_annotations(): Load 3-cone positions from JSON
 - load_parquet_data(): Load parquet files (ball, pose)
 - extract_ankle_positions(): Filter pose data to ankles only
 - get_closest_ankle_per_frame(): Find nearest ankle to ball per frame
 - get_video_fps(): Read actual FPS from video file
 """
-import json
 import logging
 from pathlib import Path
 from typing import Tuple, Optional, List
@@ -32,9 +30,6 @@ logger = logging.getLogger(__name__)
 
 # Only use ankles for ball-foot distance (more stable than toes)
 ANKLE_KEYPOINTS = ['left_ankle', 'right_ankle']
-
-# Expected cone roles for Triple Cone drill (3 cones)
-EXPECTED_CONE_ROLES = ['cone1', 'cone2', 'cone3']
 
 # Default FPS fallback when video cannot be read
 DEFAULT_FPS = 30.0
@@ -160,77 +155,6 @@ def load_triple_cone_layout_from_parquet(cone_parquet_path: str) -> TripleConeLa
         f"CONE1=({cone1[0]:.0f}, {cone1[1]:.0f}), "
         f"CONE2=({cone2[0]:.0f}, {cone2[1]:.0f}), "
         f"CONE3=({cone3[0]:.0f}, {cone3[1]:.0f})"
-    )
-
-    return layout
-
-
-def load_triple_cone_annotations(json_path: str) -> TripleConeLayout:
-    """
-    Load 3-cone positions from JSON annotation file (new format).
-
-    JSON format (new 3-cone):
-    {
-        "video": "player_name_tc.MOV",
-        "cones": {
-            "cone1": {"px": 174, "py": 861},
-            "cone2": {"px": 906, "py": 869},
-            "cone3": {"px": 1593, "py": 878}
-        }
-    }
-
-    Args:
-        json_path: Path to cone_annotations.json file
-
-    Returns:
-        TripleConeLayout with cone positions
-
-    Raises:
-        FileNotFoundError: If JSON file doesn't exist
-        ValueError: If JSON is invalid or missing required cones
-    """
-    path = Path(json_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Cone annotation file not found: {path}")
-
-    logger.info(f"Loading triple cone annotations from {path.name}")
-
-    with open(path, 'r') as f:
-        data = json.load(f)
-
-    if 'cones' not in data:
-        raise ValueError(f"Invalid JSON: missing 'cones' key in {path}")
-
-    cones = data['cones']
-
-    # Check for new 3-cone format
-    missing_roles = [role for role in EXPECTED_CONE_ROLES if role not in cones]
-    if missing_roles:
-        raise ValueError(
-            f"Invalid JSON: missing cone roles {missing_roles} in {path}. "
-            f"Expected: {EXPECTED_CONE_ROLES}"
-        )
-
-    # Validate each cone has required fields
-    for role in EXPECTED_CONE_ROLES:
-        cone_data = cones[role]
-        if 'px' not in cone_data or 'py' not in cone_data:
-            raise ValueError(
-                f"Invalid JSON: cone '{role}' missing 'px' or 'py' in {path}"
-            )
-
-    # Create TripleConeLayout
-    layout = TripleConeLayout(
-        cone1=(cones['cone1']['px'], cones['cone1']['py']),
-        cone2=(cones['cone2']['px'], cones['cone2']['py']),
-        cone3=(cones['cone3']['px'], cones['cone3']['py']),
-    )
-
-    logger.info(
-        f"Loaded Triple Cone layout from JSON: "
-        f"CONE1=({layout.cone1_x:.0f}, {layout.cone1_y:.0f}), "
-        f"CONE2=({layout.cone2_x:.0f}, {layout.cone2_y:.0f}), "
-        f"CONE3=({layout.cone3_x:.0f}, {layout.cone3_y:.0f})"
     )
 
     return layout

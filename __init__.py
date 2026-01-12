@@ -85,10 +85,8 @@ from .detection.data_loader import (
     get_closest_ankle_per_frame,
     validate_data_alignment,
     ANKLE_KEYPOINTS,
-    # 3-cone loading
+    # 3-cone loading (parquet only)
     load_triple_cone_layout_from_parquet,
-    load_triple_cone_annotations,
-    EXPECTED_CONE_ROLES,
     # Video metadata
     get_video_fps,
 )
@@ -127,30 +125,20 @@ from .detection.turning_zones import (
 # =============================================================================
 try:
     from .annotation.drill_visualizer import DrillVisualizer
-    from .annotation.cone_annotator import ConeAnnotator
     _HAS_VISUALIZER = True
 except ImportError:
     _HAS_VISUALIZER = False
     DrillVisualizer = None
-    ConeAnnotator = None
 
 # =============================================================================
 # Re-export from video module (optional - handles missing OpenCV)
 # =============================================================================
 try:
-    from .video.annotate_with_json_cones import (
-        annotate_video_with_json_cones,
-        convert_to_h264,
-        get_available_videos,
-    )
     from .video.annotate_videos import annotate_video
     from .video.annotate_triple_cone import annotate_triple_cone_video
     _HAS_VIDEO = True
 except ImportError:
     _HAS_VIDEO = False
-    annotate_video_with_json_cones = None
-    convert_to_h264 = None
-    get_available_videos = None
     annotate_video = None
     annotate_triple_cone_video = None
 
@@ -183,10 +171,8 @@ __all__ = [
     'get_closest_ankle_per_frame',
     'validate_data_alignment',
     'ANKLE_KEYPOINTS',
-    # 3-cone loading
+    # 3-cone loading (parquet only)
     'load_triple_cone_layout_from_parquet',
-    'load_triple_cone_annotations',
-    'EXPECTED_CONE_ROLES',
     # Video metadata
     'get_video_fps',
     # Triple Cone detection
@@ -212,11 +198,7 @@ __all__ = [
     'ZONE_HIGHLIGHT_COLOR',
     # Visualization (optional)
     'DrillVisualizer',
-    'ConeAnnotator',
     # Video (optional)
-    'annotate_video_with_json_cones',
-    'convert_to_h264',
-    'get_available_videos',
     'annotate_video',
     'annotate_triple_cone_video',
 ]

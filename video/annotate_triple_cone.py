@@ -75,7 +75,7 @@ class TripleConeAnnotationConfig:
     BBOX_THICKNESS: int = 2
     SKELETON_THICKNESS: int = 2
     KEYPOINT_RADIUS: int = 4
-    CONE_MARKER_SIZE: int = 15
+    # CONE_MARKER_SIZE removed - now using actual bbox dimensions from parquet
     FONT_SCALE: float = 0.5
     FONT_THICKNESS: int = 1
 
@@ -91,12 +91,26 @@ class TripleConeAnnotationConfig:
     MOMENTUM_MAX_LENGTH: int = 150
     MOMENTUM_MIN_LENGTH: int = 5
 
-    # Momentum color gradient (green=slow, yellow=medium, red=fast)
-    MOMENTUM_COLOR_LOW: Tuple[int, int, int] = (0, 255, 0)    # Green (BGR)
-    MOMENTUM_COLOR_MID: Tuple[int, int, int] = (0, 255, 255)  # Yellow (BGR)
-    MOMENTUM_COLOR_HIGH: Tuple[int, int, int] = (0, 0, 255)   # Red (BGR)
+    # Momentum color gradient (light blue=slow, blue=medium, dark blue=fast)
+    MOMENTUM_COLOR_LOW: Tuple[int, int, int] = (255, 255, 100)   # Light cyan (BGR)
+    MOMENTUM_COLOR_MID: Tuple[int, int, int] = (255, 150, 0)     # Blue (BGR)
+    MOMENTUM_COLOR_HIGH: Tuple[int, int, int] = (200, 50, 50)    # Dark blue (BGR)
     MOMENTUM_SPEED_LOW: float = 5.0
     MOMENTUM_SPEED_HIGH: float = 80.0
+
+    # Ball momentum arrow settings
+    DRAW_BALL_MOMENTUM_ARROW: bool = True
+    BALL_MOMENTUM_THICKNESS: int = 6  # Slightly thinner than player arrow (8)
+    BALL_MOMENTUM_SCALE: float = 2.5  # Different scale for ball movement
+    BALL_MOMENTUM_MAX_LENGTH: int = 120
+    BALL_MOMENTUM_MIN_LENGTH: int = 3
+
+    # Ball momentum colors (orange palette - distinct from player's blue)
+    BALL_MOMENTUM_COLOR_LOW: Tuple[int, int, int] = (150, 200, 255)   # Light orange (BGR)
+    BALL_MOMENTUM_COLOR_MID: Tuple[int, int, int] = (0, 165, 255)     # Orange (BGR)
+    BALL_MOMENTUM_COLOR_HIGH: Tuple[int, int, int] = (0, 100, 200)    # Dark orange (BGR)
+    BALL_MOMENTUM_SPEED_LOW: float = 5.0
+    BALL_MOMENTUM_SPEED_HIGH: float = 120.0  # Ball moves faster than player
 
     # Ball position relative to player settings
     # NOTE: Must match detection/ball_control_detector.py thresholds
@@ -106,8 +120,8 @@ class TripleConeAnnotationConfig:
     BALL_POSITION_ALIGNED_COLOR: Tuple[int, int, int] = (0, 255, 255) # Yellow
     BALL_POSITION_NEUTRAL_COLOR: Tuple[int, int, int] = (180, 180, 180) # Gray
     BALL_HIP_LINE_THICKNESS: int = 2
-    BALL_POSITION_THRESHOLD: float = 20.0  # Pixels for "aligned" detection
-    MOVEMENT_THRESHOLD: float = 3.0  # Min movement to determine direction
+    BALL_POSITION_THRESHOLD: float = 20.0  # Pixels for "aligned" detection (auto-scaled)
+    MOVEMENT_THRESHOLD: float = 3.0  # Min movement to determine direction (auto-scaled)
     DIVIDER_LINE_HEIGHT: int = 100
 
     # Ball-behind duration counter
@@ -118,7 +132,7 @@ class TripleConeAnnotationConfig:
     BEHIND_COUNTER_POS_X: int = 50
     BEHIND_COUNTER_POS_Y: int = 100
 
-    # Edge zone visualization
+    # Edge zone visualization (auto-scaled)
     EDGE_MARGIN: int = 50
     EDGE_ZONE_COLOR: Tuple[int, int, int] = (0, 0, 255)      # Red danger zone
     EDGE_ZONE_ALPHA: float = 0.15
@@ -129,11 +143,26 @@ class TripleConeAnnotationConfig:
     EDGE_COUNTER_POS_X: int = 50
     EDGE_COUNTER_POS_Y: int = 150
 
+    # Ball off-screen visualization settings (when ball is interpolated / not detected)
+    DRAW_OFF_SCREEN_INDICATOR: bool = True
+    OFF_SCREEN_TEXT: str = "BALL OFF-SCREEN"
+    OFF_SCREEN_COLOR: Tuple[int, int, int] = (0, 0, 255)  # Red
+    OFF_SCREEN_FONT_SCALE: float = 1.5
+    OFF_SCREEN_POS_X: int = 50   # Position on video area
+    OFF_SCREEN_POS_Y: int = 250  # Below intention counter
+
+    # Return counter settings (shows "WAS GONE: Xf" after ball returns)
+    RETURN_COUNTER_PERSIST_SECONDS: float = 3.0  # Show for 3 sec after ball returns
+    RETURN_COUNTER_COLOR: Tuple[int, int, int] = (0, 200, 255)  # Yellow-orange
+    RETURN_COUNTER_FONT_SCALE: float = 1.2
+    RETURN_COUNTER_POS_X: int = 50
+    RETURN_COUNTER_POS_Y: int = 300  # Below off-screen indicator
+
     # Torso facing direction visualization (intention arrow above head)
     DRAW_TORSO_FACING: bool = True
-    NOSE_HIP_FACING_THRESHOLD: float = 15.0  # min nose-hip X diff for facing direction
-    TORSO_FACING_COLOR_RIGHT: Tuple[int, int, int] = (0, 255, 0)    # Green
-    TORSO_FACING_COLOR_LEFT: Tuple[int, int, int] = (0, 165, 255)   # Orange
+    NOSE_HIP_FACING_THRESHOLD: float = 15.0  # min nose-hip X diff for facing direction (auto-scaled)
+    TORSO_FACING_COLOR_RIGHT: Tuple[int, int, int] = (0, 255, 255)   # Yellow (BGR) - facing right
+    TORSO_FACING_COLOR_LEFT: Tuple[int, int, int] = (255, 0, 255)   # Magenta (BGR) - facing left
     # Intention arrow settings (horizontal arrow above head)
     INTENTION_ARROW_LENGTH: int = 60          # Arrow length in pixels
     INTENTION_ARROW_THICKNESS: int = 4        # Arrow line thickness
@@ -158,6 +187,10 @@ class TripleConeAnnotationConfig:
     # Turn event log
     DRAW_EVENT_LOG: bool = True
     EVENT_LOG_MAX_EVENTS: int = 8
+
+    # Resolution scaling (set automatically based on video width)
+    RESOLUTION_SCALE: float = 1.0  # Linear scale for positions (1.0 = 2816px reference)
+    FONT_SCALE_FACTOR: float = 1.0  # Sqrt scale for fonts (gentler, stays readable)
 
 
 # Skeleton connections for pose visualization
@@ -253,30 +286,96 @@ class TurnEvent:
 # Cone Loading from Parquet
 # ============================================================================
 
-def load_cone_positions_from_parquet(parquet_path: Path) -> Tuple[Tuple[float, float], ...]:
+def read_parquet_safe(parquet_path: Path) -> pd.DataFrame:
     """
-    Load cone positions from parquet file.
+    Read parquet file with fallback for uint32 dictionary encoding issue.
 
-    Returns (cone1_pos, cone2_pos, cone3_pos) sorted by X (left to right).
+    Some parquet files use uint32 dictionary indices which pandas/pyarrow
+    doesn't support directly. This function handles that case by using
+    pyarrow to decode dictionaries first.
+    """
+    try:
+        # Try normal pandas read first
+        return pd.read_parquet(parquet_path)
+    except Exception as e:
+        if "unsigned dictionary indices" in str(e) or "uint32" in str(e):
+            # Fallback: use pyarrow and decode dictionaries manually
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+            table = pq.read_table(parquet_path)
+
+            # Decode dictionary columns to regular columns
+            new_columns = []
+            for i, field in enumerate(table.schema):
+                col = table.column(i)
+                if pa.types.is_dictionary(field.type):
+                    # For ChunkedArray, decode each chunk and combine
+                    decoded_chunks = [chunk.dictionary_decode() for chunk in col.chunks]
+                    new_col = pa.chunked_array(decoded_chunks)
+                    new_columns.append(new_col)
+                else:
+                    new_columns.append(col)
+
+            # Rebuild table with decoded columns
+            new_table = pa.table(
+                {field.name: new_columns[i] for i, field in enumerate(table.schema)}
+            )
+            return new_table.to_pandas()
+        else:
+            raise
+
+
+@dataclass
+class ConeData:
+    """Cone detection data with position and bounding box dimensions."""
+    center_x: float
+    center_y: float
+    width: float
+    height: float
+
+    @property
+    def center(self) -> Tuple[float, float]:
+        return (self.center_x, self.center_y)
+
+
+def load_cone_positions_from_parquet(parquet_path: Path) -> Tuple[ConeData, ConeData, ConeData]:
+    """
+    Load cone positions and bounding box dimensions from parquet file.
+
+    Returns (cone1, cone2, cone3) sorted by X (left to right).
     CONE1 = leftmost (HOME), CONE2 = center, CONE3 = rightmost.
+    Each cone includes center position and mean bbox dimensions.
     """
-    cone_df = pd.read_parquet(parquet_path)
+    cone_df = read_parquet_safe(parquet_path)
 
-    # Group by object_id and get mean position
-    positions = []
+    # Filter out NaN object_ids
+    cone_df = cone_df[cone_df['object_id'].notna()]
+
+    # Group by object_id and get mean position + dimensions
+    cones = []
     for obj_id in sorted(cone_df['object_id'].unique()):
         obj_data = cone_df[cone_df['object_id'] == obj_id]
         mean_x = obj_data['center_x'].mean()
         mean_y = obj_data['center_y'].mean()
-        positions.append((mean_x, mean_y))
+        mean_width = obj_data['width'].mean() if 'width' in obj_data.columns else 15.0
+        mean_height = obj_data['height'].mean() if 'height' in obj_data.columns else 15.0
+
+        # Skip positions with NaN values
+        if pd.notna(mean_x) and pd.notna(mean_y):
+            cones.append(ConeData(
+                center_x=mean_x,
+                center_y=mean_y,
+                width=mean_width if pd.notna(mean_width) else 15.0,
+                height=mean_height if pd.notna(mean_height) else 15.0,
+            ))
 
     # Sort by X position (left to right = CONE1, CONE2, CONE3)
-    positions.sort(key=lambda p: p[0])
+    cones.sort(key=lambda c: c.center_x)
 
-    if len(positions) < 3:
-        raise ValueError(f"Expected 3 cones, found {len(positions)}")
+    if len(cones) < 3:
+        raise ValueError(f"Expected 3 cones, found {len(cones)}")
 
-    return tuple(positions[:3])
+    return (cones[0], cones[1], cones[2])
 
 
 # ============================================================================
@@ -284,14 +383,17 @@ def load_cone_positions_from_parquet(parquet_path: Path) -> Tuple[Tuple[float, f
 # ============================================================================
 
 def load_ball_data(parquet_path: Path) -> pd.DataFrame:
-    """Load ball detection data."""
-    df = pd.read_parquet(parquet_path)
-    return df[['frame_id', 'x1', 'y1', 'x2', 'y2', 'confidence']].copy()
+    """Load ball detection data including interpolated flag for off-screen detection."""
+    df = read_parquet_safe(parquet_path)
+    cols = ['frame_id', 'x1', 'y1', 'x2', 'y2', 'confidence']
+    if 'interpolated' in df.columns:
+        cols.append('interpolated')
+    return df[cols].copy()
 
 
 def load_pose_data(parquet_path: Path) -> pd.DataFrame:
     """Load pose keypoint data."""
-    df = pd.read_parquet(parquet_path)
+    df = read_parquet_safe(parquet_path)
     return df[['frame_idx', 'person_id', 'keypoint_name', 'x', 'y', 'confidence']].copy()
 
 
@@ -398,28 +500,33 @@ def draw_sidebar_row(frame: np.ndarray, y: int, label: str,
                      x_coord: Optional[float], y_coord: Optional[float],
                      color: Tuple[int, int, int], config: TripleConeAnnotationConfig) -> int:
     """Draw a coordinate row in the sidebar. Returns next y position."""
-    if x_coord is not None and y_coord is not None:
+    # Check for both None and NaN values
+    x_valid = x_coord is not None and pd.notna(x_coord)
+    y_valid = y_coord is not None and pd.notna(y_coord)
+    if x_valid and y_valid:
         coord_str = f"({int(x_coord):4d}, {int(y_coord):4d})"
     else:
         coord_str = "   --"
 
-    label_x = config.SIDEBAR_PADDING + 5
+    label_x = config.SIDEBAR_PADDING + max(2, int(5 * config.FONT_SCALE_FACTOR))
     cv2.putText(frame, f"{label}:", (label_x, y),
-                cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE - 0.05,
+                cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE - 0.05 * config.FONT_SCALE_FACTOR,
                 color, 1, cv2.LINE_AA)
 
-    coord_x = config.SIDEBAR_WIDTH - 130
+    # Coordinate column offset proportional to sidebar width (130/300 = 43% from right edge)
+    coord_offset = int(130 * config.RESOLUTION_SCALE)  # Keep linear for position
+    coord_x = config.SIDEBAR_WIDTH - coord_offset
     cv2.putText(frame, coord_str, (coord_x, y),
-                cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE - 0.05,
+                cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE - 0.05 * config.FONT_SCALE_FACTOR,
                 (200, 200, 200), 1, cv2.LINE_AA)
 
     return y + config.SIDEBAR_LINE_HEIGHT
 
 
 def draw_sidebar(frame: np.ndarray, frame_id: int,
-                 cone1: Tuple[float, float],
-                 cone2: Tuple[float, float],
-                 cone3: Tuple[float, float],
+                 cone1: ConeData,
+                 cone2: ConeData,
+                 cone3: ConeData,
                  ball_center: Optional[Tuple[float, float]],
                  pose_keypoints: Dict[str, Tuple[float, float, float]],
                  config: TripleConeAnnotationConfig,
@@ -441,33 +548,33 @@ def draw_sidebar(frame: np.ndarray, frame_id: int,
     # ===== CONES SECTION (3 cones) =====
     y = draw_sidebar_section_header(frame, y, "CONES (static)",
                                     config.CONE1_COLOR, config)
-    y += 5
+    y += max(2, int(5 * config.FONT_SCALE_FACTOR))
 
-    y = draw_sidebar_row(frame, y, "CONE1", cone1[0], cone1[1],
+    y = draw_sidebar_row(frame, y, "CONE1", cone1.center_x, cone1.center_y,
                          config.CONE1_COLOR, config)
-    y = draw_sidebar_row(frame, y, "CONE2", cone2[0], cone2[1],
+    y = draw_sidebar_row(frame, y, "CONE2", cone2.center_x, cone2.center_y,
                          config.CONE2_COLOR, config)
-    y = draw_sidebar_row(frame, y, "CONE3", cone3[0], cone3[1],
+    y = draw_sidebar_row(frame, y, "CONE3", cone3.center_x, cone3.center_y,
                          config.CONE3_COLOR, config)
 
-    y += 10
+    y += max(4, int(10 * config.FONT_SCALE_FACTOR))
 
     # ===== BALL SECTION =====
     y = draw_sidebar_section_header(frame, y, "BALL (dynamic)",
                                     config.BALL_COLOR, config)
-    y += 5
+    y += max(2, int(5 * config.FONT_SCALE_FACTOR))
 
     ball_x = ball_center[0] if ball_center else None
     ball_y = ball_center[1] if ball_center else None
     y = draw_sidebar_row(frame, y, "BALL", ball_x, ball_y,
                          config.BALL_COLOR, config)
 
-    y += 10
+    y += max(4, int(10 * config.FONT_SCALE_FACTOR))
 
     # ===== POSE SECTION =====
     y = draw_sidebar_section_header(frame, y, "POSE (dynamic)",
                                     config.POSE_SKELETON_COLOR, config)
-    y += 5
+    y += max(2, int(5 * config.FONT_SCALE_FACTOR))
 
     for kp_name, display_name in TRACKED_KEYPOINTS:
         if kp_name in pose_keypoints:
@@ -483,12 +590,12 @@ def draw_sidebar(frame: np.ndarray, frame_id: int,
             y = draw_sidebar_row(frame, y, display_name, None, None,
                                  (100, 100, 100), config)
 
-    y += 15
+    y += max(6, int(15 * config.FONT_SCALE_FACTOR))
 
     # ===== TURNING ZONE SECTION (3 zones) =====
     y = draw_sidebar_section_header(frame, y, "TURNING ZONE",
                                     (150, 150, 150), config)
-    y += 5
+    y += max(2, int(5 * config.FONT_SCALE_FACTOR))
 
     if active_zone == "CONE1":
         zone_text = "Ball in: CONE1 (HOME)"
@@ -504,27 +611,29 @@ def draw_sidebar(frame: np.ndarray, frame_id: int,
         zone_color = (100, 100, 100)
 
     cv2.putText(frame, zone_text,
-                (config.SIDEBAR_PADDING + 5, y),
+                (config.SIDEBAR_PADDING + max(2, int(5 * config.FONT_SCALE_FACTOR)), y),
                 cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE,
                 zone_color, 1, cv2.LINE_AA)
 
-    y += config.SIDEBAR_LINE_HEIGHT + 10
+    y += config.SIDEBAR_LINE_HEIGHT + max(4, int(10 * config.FONT_SCALE_FACTOR))
 
     # ===== BALL POSITION SECTION =====
     y = draw_sidebar_section_header(frame, y, "BALL POSITION",
                                     (150, 150, 150), config)
-    y += 5
+    y += max(2, int(5 * config.FONT_SCALE_FACTOR))
+
+    text_indent = config.SIDEBAR_PADDING + max(2, int(5 * config.FONT_SCALE_FACTOR))
 
     # Momentum-based position (existing)
     if ball_position_result is not None:
         momentum_text = f"Momentum: {ball_position_result.position}"
         cv2.putText(frame, momentum_text,
-                    (config.SIDEBAR_PADDING + 5, y),
+                    (text_indent, y),
                     cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE,
                     ball_position_result.color, 1, cv2.LINE_AA)
     else:
         cv2.putText(frame, "Momentum: --",
-                    (config.SIDEBAR_PADDING + 5, y),
+                    (text_indent, y),
                     cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE,
                     (100, 100, 100), 1, cv2.LINE_AA)
     y += config.SIDEBAR_LINE_HEIGHT
@@ -533,12 +642,12 @@ def draw_sidebar(frame: np.ndarray, frame_id: int,
     if intention_result is not None:
         intention_text = f"Intention: {intention_result.position}"
         cv2.putText(frame, intention_text,
-                    (config.SIDEBAR_PADDING + 5, y),
+                    (text_indent, y),
                     cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE,
                     intention_result.color, 1, cv2.LINE_AA)
     else:
         cv2.putText(frame, "Intention: --",
-                    (config.SIDEBAR_PADDING + 5, y),
+                    (text_indent, y),
                     cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE,
                     (100, 100, 100), 1, cv2.LINE_AA)
     y += config.SIDEBAR_LINE_HEIGHT
@@ -547,17 +656,17 @@ def draw_sidebar(frame: np.ndarray, frame_id: int,
     delta_x = ball_position_result.ball_hip_delta_x if ball_position_result else 0.0
     delta_text = f"Delta X: {delta_x:+.0f}px"
     cv2.putText(frame, delta_text,
-                (config.SIDEBAR_PADDING + 5, y),
-                cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE - 0.1,
+                (text_indent, y),
+                cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE - 0.1 * config.FONT_SCALE_FACTOR,
                 (180, 180, 180), 1, cv2.LINE_AA)
 
-    y += config.SIDEBAR_LINE_HEIGHT + 10
+    y += config.SIDEBAR_LINE_HEIGHT + max(4, int(10 * config.FONT_SCALE_FACTOR))
 
     # ===== TURN EVENTS SECTION =====
     if config.DRAW_EVENT_LOG and turn_events:
         y = draw_sidebar_section_header(frame, y, "TURN EVENTS",
                                         (150, 150, 150), config)
-        y += 5
+        y += max(2, int(5 * config.FONT_SCALE_FACTOR))
 
         recent = turn_events[-config.EVENT_LOG_MAX_EVENTS:]
         for event in recent:
@@ -580,6 +689,82 @@ def draw_sidebar(frame: np.ndarray, frame_id: int,
                         event_color, 1, cv2.LINE_AA)
             y += config.SIDEBAR_LINE_HEIGHT - 4
 
+    # ===== ARROW LEGEND SECTION =====
+    y += max(6, int(15 * config.FONT_SCALE_FACTOR))
+    y = draw_sidebar_section_header(frame, y, "ARROW LEGEND",
+                                    (150, 150, 150), config)
+    y += max(2, int(5 * config.FONT_SCALE_FACTOR))
+
+    # Scale legend layout values (with minimum values for readability)
+    scale = config.FONT_SCALE_FACTOR  # Use font scale for legend
+    legend_font_scale = max(0.35, 0.45 * scale)  # Minimum 0.35 for readability
+    legend_height = max(8, int(12 * scale))
+    swatch_width = max(12, int(18 * scale))
+    text_offset = max(16, int(22 * scale))
+    col2_offset = max(45, int(60 * scale))
+    col3_offset = max(90, int(115 * scale))
+
+    # Momentum arrow legend (at hip)
+    cv2.putText(frame, "MOMENTUM (at hip):",
+                (config.SIDEBAR_PADDING + max(2, int(5 * scale)), y),
+                cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE - 0.1 * scale,
+                (200, 200, 200), 1, cv2.LINE_AA)
+    y += config.SIDEBAR_LINE_HEIGHT - max(1, int(2 * scale))
+
+    # Draw small color samples for momentum
+    sample_x = config.SIDEBAR_PADDING + max(4, int(10 * scale))
+    cv2.rectangle(frame, (sample_x, y - legend_height), (sample_x + swatch_width, y), config.MOMENTUM_COLOR_LOW, -1)
+    cv2.putText(frame, "Slow", (sample_x + text_offset, y),
+                cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, config.MOMENTUM_COLOR_LOW, 1, cv2.LINE_AA)
+
+    cv2.rectangle(frame, (sample_x + col2_offset, y - legend_height), (sample_x + col2_offset + swatch_width, y), config.MOMENTUM_COLOR_MID, -1)
+    cv2.putText(frame, "Med", (sample_x + col2_offset + text_offset, y),
+                cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, config.MOMENTUM_COLOR_MID, 1, cv2.LINE_AA)
+
+    cv2.rectangle(frame, (sample_x + col3_offset, y - legend_height), (sample_x + col3_offset + swatch_width, y), config.MOMENTUM_COLOR_HIGH, -1)
+    cv2.putText(frame, "Fast", (sample_x + col3_offset + text_offset, y),
+                cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, config.MOMENTUM_COLOR_HIGH, 1, cv2.LINE_AA)
+    y += config.SIDEBAR_LINE_HEIGHT + max(2, int(5 * scale))
+
+    # Intention arrow legend (above head)
+    cv2.putText(frame, "INTENTION (above head):",
+                (config.SIDEBAR_PADDING + max(2, int(5 * scale)), y),
+                cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE - 0.1 * scale,
+                (200, 200, 200), 1, cv2.LINE_AA)
+    y += config.SIDEBAR_LINE_HEIGHT - max(1, int(2 * scale))
+
+    # Draw small color samples for intention (2 columns only)
+    intent_col2_offset = max(50, int(70 * scale))
+    cv2.rectangle(frame, (sample_x, y - legend_height), (sample_x + swatch_width, y), config.TORSO_FACING_COLOR_RIGHT, -1)
+    cv2.putText(frame, "Right", (sample_x + text_offset, y),
+                cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, config.TORSO_FACING_COLOR_RIGHT, 1, cv2.LINE_AA)
+
+    cv2.rectangle(frame, (sample_x + intent_col2_offset, y - legend_height), (sample_x + intent_col2_offset + swatch_width, y), config.TORSO_FACING_COLOR_LEFT, -1)
+    cv2.putText(frame, "Left", (sample_x + intent_col2_offset + text_offset, y),
+                cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, config.TORSO_FACING_COLOR_LEFT, 1, cv2.LINE_AA)
+    y += config.SIDEBAR_LINE_HEIGHT + max(2, int(5 * scale))
+
+    # Ball momentum arrow legend (at ball)
+    cv2.putText(frame, "BALL MOMENTUM:",
+                (config.SIDEBAR_PADDING + max(2, int(5 * scale)), y),
+                cv2.FONT_HERSHEY_SIMPLEX, config.SIDEBAR_FONT_SCALE - 0.1 * scale,
+                (200, 200, 200), 1, cv2.LINE_AA)
+    y += config.SIDEBAR_LINE_HEIGHT - max(1, int(2 * scale))
+
+    # Draw small color samples for ball momentum (orange gradient)
+    cv2.rectangle(frame, (sample_x, y - legend_height), (sample_x + swatch_width, y), config.BALL_MOMENTUM_COLOR_LOW, -1)
+    cv2.putText(frame, "Slow", (sample_x + text_offset, y),
+                cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, config.BALL_MOMENTUM_COLOR_LOW, 1, cv2.LINE_AA)
+
+    cv2.rectangle(frame, (sample_x + col2_offset, y - legend_height), (sample_x + col2_offset + swatch_width, y), config.BALL_MOMENTUM_COLOR_MID, -1)
+    cv2.putText(frame, "Med", (sample_x + col2_offset + text_offset, y),
+                cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, config.BALL_MOMENTUM_COLOR_MID, 1, cv2.LINE_AA)
+
+    cv2.rectangle(frame, (sample_x + col3_offset, y - legend_height), (sample_x + col3_offset + swatch_width, y), config.BALL_MOMENTUM_COLOR_HIGH, -1)
+    cv2.putText(frame, "Fast", (sample_x + col3_offset + text_offset, y),
+                cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, config.BALL_MOMENTUM_COLOR_HIGH, 1, cv2.LINE_AA)
+    y += config.SIDEBAR_LINE_HEIGHT
+
     # Vertical separator line
     cv2.line(frame, (config.SIDEBAR_WIDTH - 1, 0),
              (config.SIDEBAR_WIDTH - 1, frame.shape[0]),
@@ -594,6 +779,9 @@ def draw_bbox(frame: np.ndarray, x1: float, y1: float, x2: float, y2: float,
               color: Tuple[int, int, int], label: str, config: TripleConeAnnotationConfig,
               x_offset: int = 0) -> None:
     """Draw a bounding box with label."""
+    # Skip if any coordinate is NaN
+    if any(pd.isna(v) for v in [x1, y1, x2, y2]):
+        return
     x1, y1, x2, y2 = int(x1) + x_offset, int(y1), int(x2) + x_offset, int(y2)
 
     cv2.rectangle(frame, (x1, y1), (x2, y2), color, config.BBOX_THICKNESS)
@@ -609,26 +797,27 @@ def draw_bbox(frame: np.ndarray, x1: float, y1: float, x2: float, y2: float,
 
 def draw_triple_cone_markers(
     frame: np.ndarray,
-    cone1: Tuple[float, float],
-    cone2: Tuple[float, float],
-    cone3: Tuple[float, float],
+    cone1: ConeData,
+    cone2: ConeData,
+    cone3: ConeData,
     config: TripleConeAnnotationConfig,
     x_offset: int = 0
 ) -> None:
-    """Draw 3 cone markers with labels (no gate lines)."""
+    """Draw 3 cone markers with actual bounding boxes from detection."""
     cones = [
         ("CONE1 (HOME)", cone1, config.CONE1_COLOR),
         ("CONE2", cone2, config.CONE2_COLOR),
         ("CONE3", cone3, config.CONE3_COLOR),
     ]
 
-    for label, (cx, cy), color in cones:
-        # Draw rectangle marker
-        half_size = config.CONE_MARKER_SIZE
-        x1 = int(cx) + x_offset - half_size
-        y1 = int(cy) - half_size
-        x2 = int(cx) + x_offset + half_size
-        y2 = int(cy) + half_size
+    for label, cone, color in cones:
+        # Draw actual bounding box from detection
+        half_w = cone.width / 2
+        half_h = cone.height / 2
+        x1 = int(cone.center_x - half_w) + x_offset
+        y1 = int(cone.center_y - half_h)
+        x2 = int(cone.center_x + half_w) + x_offset
+        y2 = int(cone.center_y + half_h)
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
@@ -703,6 +892,10 @@ def draw_momentum_arrow(
     x_offset: int = 0
 ) -> None:
     """Draw thick horizontal momentum arrow with color gradient."""
+    # Skip if any coordinate is NaN
+    if any(pd.isna(v) for v in [current_hip[0], current_hip[1], previous_hip[0], previous_hip[1]]):
+        return
+
     dx = current_hip[0] - previous_hip[0]
     horizontal_magnitude = abs(dx)
 
@@ -726,6 +919,71 @@ def draw_momentum_arrow(
         (end_x, end_y),
         color,
         config.MOMENTUM_THICKNESS,
+        tipLength=0.25,
+        line_type=cv2.LINE_AA
+    )
+
+
+def get_ball_momentum_color(magnitude: float, config: TripleConeAnnotationConfig) -> Tuple[int, int, int]:
+    """Calculate ball momentum arrow color based on speed magnitude (orange gradient)."""
+    if magnitude <= config.BALL_MOMENTUM_SPEED_LOW:
+        t = 0.0
+    elif magnitude >= config.BALL_MOMENTUM_SPEED_HIGH:
+        t = 1.0
+    else:
+        t = (magnitude - config.BALL_MOMENTUM_SPEED_LOW) / (config.BALL_MOMENTUM_SPEED_HIGH - config.BALL_MOMENTUM_SPEED_LOW)
+
+    if t <= 0.5:
+        ratio = t * 2
+        b = int(config.BALL_MOMENTUM_COLOR_LOW[0] + ratio * (config.BALL_MOMENTUM_COLOR_MID[0] - config.BALL_MOMENTUM_COLOR_LOW[0]))
+        g = int(config.BALL_MOMENTUM_COLOR_LOW[1] + ratio * (config.BALL_MOMENTUM_COLOR_MID[1] - config.BALL_MOMENTUM_COLOR_LOW[1]))
+        r = int(config.BALL_MOMENTUM_COLOR_LOW[2] + ratio * (config.BALL_MOMENTUM_COLOR_MID[2] - config.BALL_MOMENTUM_COLOR_LOW[2]))
+    else:
+        ratio = (t - 0.5) * 2
+        b = int(config.BALL_MOMENTUM_COLOR_MID[0] + ratio * (config.BALL_MOMENTUM_COLOR_HIGH[0] - config.BALL_MOMENTUM_COLOR_MID[0]))
+        g = int(config.BALL_MOMENTUM_COLOR_MID[1] + ratio * (config.BALL_MOMENTUM_COLOR_HIGH[1] - config.BALL_MOMENTUM_COLOR_MID[1]))
+        r = int(config.BALL_MOMENTUM_COLOR_MID[2] + ratio * (config.BALL_MOMENTUM_COLOR_HIGH[2] - config.BALL_MOMENTUM_COLOR_MID[2]))
+
+    return (b, g, r)
+
+
+def draw_ball_momentum_arrow(
+    frame: np.ndarray,
+    current_ball: Tuple[float, float],
+    previous_ball: Tuple[float, float],
+    config: TripleConeAnnotationConfig,
+    x_offset: int = 0
+) -> None:
+    """Draw momentum arrow for ball showing movement direction and speed (orange gradient)."""
+    # Skip if any coordinate is NaN
+    if any(pd.isna(v) for v in [current_ball[0], current_ball[1], previous_ball[0], previous_ball[1]]):
+        return
+
+    dx = current_ball[0] - previous_ball[0]
+    dy = current_ball[1] - previous_ball[1]
+    magnitude = np.sqrt(dx * dx + dy * dy)
+
+    if magnitude < config.BALL_MOMENTUM_MIN_LENGTH:
+        return
+
+    color = get_ball_momentum_color(magnitude, config)
+    scaled_length = min(magnitude * config.BALL_MOMENTUM_SCALE, config.BALL_MOMENTUM_MAX_LENGTH)
+
+    # Normalize direction
+    norm_dx = dx / magnitude
+    norm_dy = dy / magnitude
+
+    start_x = int(current_ball[0]) + x_offset
+    start_y = int(current_ball[1])
+    end_x = int(start_x + norm_dx * scaled_length)
+    end_y = int(start_y + norm_dy * scaled_length)
+
+    cv2.arrowedLine(
+        frame,
+        (start_x, start_y),
+        (end_x, end_y),
+        color,
+        config.BALL_MOMENTUM_THICKNESS,
         tipLength=0.25,
         line_type=cv2.LINE_AA
     )
@@ -1048,17 +1306,21 @@ def draw_ball_position_indicator(
     if result.position == "UNKNOWN":
         return
 
+    # Skip if any coordinate is NaN
+    if any(pd.isna(v) for v in [ball_center[0], ball_center[1], hip_position[0], hip_position[1]]):
+        return
+
     hip_x = int(hip_position[0]) + x_offset
     hip_y = int(hip_position[1])
     ball_x = int(ball_center[0]) + x_offset
     ball_y = int(ball_center[1])
 
-    # 1. Dashed vertical line through hip
+    # 1. Dashed vertical line through hip (use config dash/gap values)
     half_height = config.DIVIDER_LINE_HEIGHT // 2
     line_color = (100, 100, 100)
 
-    dash_length = 10
-    gap_length = 5
+    dash_length = config.INTENTION_LINE_DASH_LENGTH  # Already scaled
+    gap_length = config.INTENTION_LINE_GAP_LENGTH    # Already scaled
     y_start = hip_y - half_height
     y_end = hip_y + half_height
     y = y_start
@@ -1067,28 +1329,29 @@ def draw_ball_position_indicator(
         cv2.line(frame, (hip_x, y), (hip_x, y_next), line_color, 1, cv2.LINE_AA)
         y = y_next + gap_length
 
-    # Hip marker
-    cv2.circle(frame, (hip_x, hip_y), 5, result.color, -1)
-    cv2.circle(frame, (hip_x, hip_y), 5, (255, 255, 255), 1)
+    # Hip marker (scale radius)
+    hip_radius = max(2, int(5 * config.FONT_SCALE_FACTOR))
+    cv2.circle(frame, (hip_x, hip_y), hip_radius, result.color, -1)
+    cv2.circle(frame, (hip_x, hip_y), hip_radius, (255, 255, 255), 1)
 
     # 2. Connecting line from hip to ball
     cv2.line(frame, (hip_x, hip_y), (ball_x, ball_y),
              result.color, config.BALL_HIP_LINE_THICKNESS, cv2.LINE_AA)
 
-    # 3. Position label above ball
+    # 3. Position label above ball (scale font and positioning)
     label = result.position
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.6
-    font_thickness = 2
+    font_scale = 0.6 * config.FONT_SCALE_FACTOR
+    font_thickness = max(1, int(2 * config.FONT_SCALE_FACTOR))
 
     (text_width, text_height), baseline = cv2.getTextSize(
         label, font, font_scale, font_thickness
     )
 
     label_x = ball_x - text_width // 2
-    label_y = ball_y - 30
+    label_y = ball_y - int(30 * config.FONT_SCALE_FACTOR)
 
-    padding = 3
+    padding = max(2, int(3 * config.FONT_SCALE_FACTOR))
     cv2.rectangle(
         frame,
         (label_x - padding, label_y - text_height - padding),
@@ -1101,21 +1364,7 @@ def draw_ball_position_indicator(
         font, font_scale, result.color, font_thickness, cv2.LINE_AA
     )
 
-    # 4. Movement direction arrow at top of divider
-    if result.movement_direction:
-        arrow_y = y_start - 15
-        arrow_length = 25
-        if result.movement_direction == "LEFT":
-            arrow_end_x = hip_x - arrow_length
-        else:
-            arrow_end_x = hip_x + arrow_length
-
-        cv2.arrowedLine(
-            frame,
-            (hip_x, arrow_y),
-            (arrow_end_x, arrow_y),
-            result.color, 2, tipLength=0.4, line_type=cv2.LINE_AA
-        )
+    # Movement direction arrow removed - redundant with momentum arrow at hip
 
 
 def draw_dashed_line(
@@ -1182,6 +1431,10 @@ def draw_intention_position_indicator(
     if result.position == "UNKNOWN":
         return
 
+    # Skip if any coordinate is NaN
+    if any(pd.isna(v) for v in [ball_center[0], ball_center[1], hip_position[0], hip_position[1]]):
+        return
+
     hip_x = int(hip_position[0]) + x_offset
     hip_y = int(hip_position[1])
     ball_x = int(ball_center[0]) + x_offset
@@ -1243,11 +1496,15 @@ def draw_behind_counter(
     color = config.BEHIND_COUNTER_COLOR if is_active else config.BEHIND_COUNTER_PERSIST_COLOR
 
     font = cv2.FONT_HERSHEY_SIMPLEX
-    (tw, th), _ = cv2.getTextSize(text, font, config.BEHIND_COUNTER_FONT_SCALE, 2)
+    thickness = max(1, int(2 * config.FONT_SCALE_FACTOR))
+    (tw, th), _ = cv2.getTextSize(text, font, config.BEHIND_COUNTER_FONT_SCALE, thickness)
 
-    cv2.rectangle(frame, (x - 5, y - th - 10), (x + tw + 10, y + 10), (0, 0, 0), -1)
+    # Scale padding proportionally
+    pad_x = max(2, int(5 * config.FONT_SCALE_FACTOR))
+    pad_y = max(4, int(10 * config.FONT_SCALE_FACTOR))
+    cv2.rectangle(frame, (x - pad_x, y - th - pad_y), (x + tw + pad_x * 2, y + pad_y), (0, 0, 0), -1)
     cv2.putText(frame, text, (x, y), font,
-                config.BEHIND_COUNTER_FONT_SCALE, color, 2, cv2.LINE_AA)
+                config.BEHIND_COUNTER_FONT_SCALE, color, thickness, cv2.LINE_AA)
 
 
 def draw_intention_behind_counter(
@@ -1269,11 +1526,15 @@ def draw_intention_behind_counter(
     color = config.INTENTION_BEHIND_COLOR if is_active else (255, 150, 255)  # Lighter magenta
 
     font = cv2.FONT_HERSHEY_SIMPLEX
-    (tw, th), _ = cv2.getTextSize(text, font, config.BEHIND_COUNTER_FONT_SCALE, 2)
+    thickness = max(1, int(2 * config.FONT_SCALE_FACTOR))
+    (tw, th), _ = cv2.getTextSize(text, font, config.BEHIND_COUNTER_FONT_SCALE, thickness)
 
-    cv2.rectangle(frame, (x - 5, y - th - 10), (x + tw + 10, y + 10), (0, 0, 0), -1)
+    # Scale padding proportionally
+    pad_x = max(2, int(5 * config.FONT_SCALE_FACTOR))
+    pad_y = max(4, int(10 * config.FONT_SCALE_FACTOR))
+    cv2.rectangle(frame, (x - pad_x, y - th - pad_y), (x + tw + pad_x * 2, y + pad_y), (0, 0, 0), -1)
     cv2.putText(frame, text, (x, y), font,
-                config.BEHIND_COUNTER_FONT_SCALE, color, 2, cv2.LINE_AA)
+                config.BEHIND_COUNTER_FONT_SCALE, color, thickness, cv2.LINE_AA)
 
 
 def draw_edge_zones(
@@ -1324,11 +1585,85 @@ def draw_edge_counter(
     color = config.EDGE_COUNTER_COLOR if is_active else config.EDGE_COUNTER_PERSIST_COLOR
 
     font = cv2.FONT_HERSHEY_SIMPLEX
-    (tw, th), _ = cv2.getTextSize(text, font, config.EDGE_COUNTER_FONT_SCALE, 2)
+    thickness = max(1, int(2 * config.FONT_SCALE_FACTOR))
+    (tw, th), _ = cv2.getTextSize(text, font, config.EDGE_COUNTER_FONT_SCALE, thickness)
 
-    cv2.rectangle(frame, (x - 5, y - th - 10), (x + tw + 10, y + 10), (0, 0, 0), -1)
+    # Scale padding proportionally
+    pad_x = max(2, int(5 * config.FONT_SCALE_FACTOR))
+    pad_y = max(4, int(10 * config.FONT_SCALE_FACTOR))
+    cv2.rectangle(frame, (x - pad_x, y - th - pad_y), (x + tw + pad_x * 2, y + pad_y), (0, 0, 0), -1)
     cv2.putText(frame, text, (x, y), font,
-                config.EDGE_COUNTER_FONT_SCALE, color, 2, cv2.LINE_AA)
+                config.EDGE_COUNTER_FONT_SCALE, color, thickness, cv2.LINE_AA)
+
+
+def draw_off_screen_indicator(
+    frame: np.ndarray,
+    config: TripleConeAnnotationConfig,
+    x_offset: int = 0
+) -> None:
+    """
+    Draw 'BALL OFF-SCREEN' indicator when ball is not detected.
+
+    Args:
+        frame: Video frame to draw on
+        config: Annotation configuration
+        x_offset: Horizontal offset (for sidebar)
+    """
+    text = config.OFF_SCREEN_TEXT
+    x = x_offset + config.OFF_SCREEN_POS_X
+    y = config.OFF_SCREEN_POS_Y
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    thickness = max(1, int(2 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+    (tw, th), _ = cv2.getTextSize(text, font, config.OFF_SCREEN_FONT_SCALE, thickness)
+
+    # Scale padding proportionally
+    pad_x = max(2, int(5 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+    pad_y = max(4, int(10 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+
+    # Draw background box
+    cv2.rectangle(frame, (x - pad_x, y - th - pad_y), (x + tw + pad_x * 2, y + pad_y), (0, 0, 0), -1)
+
+    # Draw text
+    cv2.putText(frame, text, (x, y), font,
+                config.OFF_SCREEN_FONT_SCALE, config.OFF_SCREEN_COLOR, thickness, cv2.LINE_AA)
+
+
+def draw_return_counter(
+    frame: np.ndarray,
+    frames_gone: int,
+    config: TripleConeAnnotationConfig,
+    x_offset: int = 0
+) -> None:
+    """
+    Draw counter showing how long ball was off-screen (after it returns).
+
+    Shows "WAS GONE: Xf" to indicate how many frames the ball was not detected.
+
+    Args:
+        frame: Video frame to draw on
+        frames_gone: Number of frames the ball was off-screen
+        config: Annotation configuration
+        x_offset: Horizontal offset (for sidebar)
+    """
+    text = f"WAS GONE: {frames_gone}f"
+    x = x_offset + config.RETURN_COUNTER_POS_X
+    y = config.RETURN_COUNTER_POS_Y
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    thickness = max(1, int(2 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+    (tw, th), _ = cv2.getTextSize(text, font, config.RETURN_COUNTER_FONT_SCALE, thickness)
+
+    # Scale padding proportionally
+    pad_x = max(2, int(5 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+    pad_y = max(4, int(10 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+
+    # Draw background box
+    cv2.rectangle(frame, (x - pad_x, y - th - pad_y), (x + tw + pad_x * 2, y + pad_y), (0, 0, 0), -1)
+
+    # Draw text
+    cv2.putText(frame, text, (x, y), font,
+                config.RETURN_COUNTER_FONT_SCALE, config.RETURN_COUNTER_COLOR, thickness, cv2.LINE_AA)
 
 
 def draw_debug_axes(
@@ -1341,6 +1676,9 @@ def draw_debug_axes(
 ) -> None:
     """Draw debug axes through ball position (always on)."""
     if ball_center is None:
+        return
+    # Skip if coordinates are NaN
+    if pd.isna(ball_center[0]) or pd.isna(ball_center[1]):
         return
 
     ball_x = int(ball_center[0]) + x_offset
@@ -1383,9 +1721,9 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
         print(f"  Error loading cones: {e}")
         return False
 
-    print(f"    CONE1 (HOME): ({cone1[0]:.0f}, {cone1[1]:.0f})")
-    print(f"    CONE2 (CENTER): ({cone2[0]:.0f}, {cone2[1]:.0f})")
-    print(f"    CONE3 (RIGHT): ({cone3[0]:.0f}, {cone3[1]:.0f})")
+    print(f"    CONE1 (HOME): ({cone1.center_x:.0f}, {cone1.center_y:.0f}) [{cone1.width:.0f}x{cone1.height:.0f}]")
+    print(f"    CONE2 (CENTER): ({cone2.center_x:.0f}, {cone2.center_y:.0f}) [{cone2.width:.0f}x{cone2.height:.0f}]")
+    print(f"    CONE3 (RIGHT): ({cone3.center_x:.0f}, {cone3.center_y:.0f}) [{cone3.width:.0f}x{cone3.height:.0f}]")
 
     # Create turning zones (scaling will be applied after video resolution is known)
     # Zone config is created here but will be updated after we know the resolution
@@ -1406,9 +1744,12 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
     ball_df = load_ball_data(ball_parquets[0])
     pose_df = load_pose_data(pose_parquets[0])
 
-    # Create lookup structures
+    # Create lookup structures (include interpolated if available for off-screen detection)
+    ball_cols = ['x1', 'y1', 'x2', 'y2', 'confidence']
+    if 'interpolated' in ball_df.columns:
+        ball_cols.append('interpolated')
     ball_lookup = ball_df.groupby('frame_id').apply(
-        lambda g: g[['x1', 'y1', 'x2', 'y2', 'confidence']].to_dict('records')
+        lambda g: g[ball_cols].to_dict('records')
     ).to_dict()
     pose_lookup = prepare_pose_lookup(pose_df)
 
@@ -1425,20 +1766,56 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     # Resolution auto-detection and config scaling
-    REFERENCE_WIDTH = 2816  # Original Triple Cone video resolution
+    REFERENCE_WIDTH = 1920  # Full HD baseline (more reasonable for most videos)
     resolution_scale = orig_width / REFERENCE_WIDTH
 
     if abs(resolution_scale - 1.0) > 0.01:  # Not original resolution
-        print(f"  [AUTO-SCALE] Detected {orig_width}px width, scaling config by {resolution_scale:.4f}")
+        # Use sqrt for font scaling (gentler) vs linear for positions
+        import math
+        font_scale = math.sqrt(resolution_scale)  # 0.45 -> 0.67 (gentler)
 
-        # Scale pixel-based thresholds
+        print(f"  [AUTO-SCALE] Detected {orig_width}px width")
+        print(f"    Position scale: {resolution_scale:.3f}, Font scale: {font_scale:.3f}")
+
+        # Store scale factors for use in drawing functions
+        config.RESOLUTION_SCALE = resolution_scale
+        config.FONT_SCALE_FACTOR = font_scale  # For inline font scaling
+
+        # Scale pixel-based thresholds (linear - these are distances)
         config.BALL_POSITION_THRESHOLD *= resolution_scale
+        config.MOVEMENT_THRESHOLD *= resolution_scale
+        config.NOSE_HIP_FACING_THRESHOLD *= resolution_scale
         config.EDGE_MARGIN = int(config.EDGE_MARGIN * resolution_scale)
         config.BEHIND_COUNTER_POS_X = int(config.BEHIND_COUNTER_POS_X * resolution_scale)
         config.BEHIND_COUNTER_POS_Y = int(config.BEHIND_COUNTER_POS_Y * resolution_scale)
         config.EDGE_COUNTER_POS_X = int(config.EDGE_COUNTER_POS_X * resolution_scale)
         config.EDGE_COUNTER_POS_Y = int(config.EDGE_COUNTER_POS_Y * resolution_scale)
         config.INTENTION_BEHIND_COUNTER_POS_Y = int(config.INTENTION_BEHIND_COUNTER_POS_Y * resolution_scale)
+        config.OFF_SCREEN_POS_X = int(config.OFF_SCREEN_POS_X * resolution_scale)
+        config.OFF_SCREEN_POS_Y = int(config.OFF_SCREEN_POS_Y * resolution_scale)
+        config.RETURN_COUNTER_POS_X = int(config.RETURN_COUNTER_POS_X * resolution_scale)
+        config.RETURN_COUNTER_POS_Y = int(config.RETURN_COUNTER_POS_Y * resolution_scale)
+
+        # Scale sidebar dimensions (with minimum values for readability)
+        config.SIDEBAR_WIDTH = max(200, int(config.SIDEBAR_WIDTH * resolution_scale))
+        config.SIDEBAR_LINE_HEIGHT = max(18, int(config.SIDEBAR_LINE_HEIGHT * font_scale))
+        config.SIDEBAR_PADDING = max(10, int(config.SIDEBAR_PADDING * font_scale))
+
+        # Scale font sizes (sqrt scaling - stay readable, with minimums)
+        config.SIDEBAR_FONT_SCALE = max(0.40, config.SIDEBAR_FONT_SCALE * font_scale)
+        config.FONT_SCALE = max(0.35, config.FONT_SCALE * font_scale)
+        config.BEHIND_COUNTER_FONT_SCALE *= font_scale
+        config.EDGE_COUNTER_FONT_SCALE *= font_scale
+        config.OFF_SCREEN_FONT_SCALE *= font_scale
+        config.RETURN_COUNTER_FONT_SCALE *= font_scale
+
+        # Scale line/arrow thicknesses (use font_scale for visual consistency)
+        config.MOMENTUM_THICKNESS = max(3, int(config.MOMENTUM_THICKNESS * font_scale))
+        config.BALL_MOMENTUM_THICKNESS = max(2, int(config.BALL_MOMENTUM_THICKNESS * font_scale))
+        config.INTENTION_ARROW_THICKNESS = max(2, int(config.INTENTION_ARROW_THICKNESS * font_scale))
+        config.SKELETON_THICKNESS = max(1, int(config.SKELETON_THICKNESS * font_scale))
+        config.BBOX_THICKNESS = max(1, int(config.BBOX_THICKNESS * font_scale))
+        config.BALL_HIP_LINE_THICKNESS = max(1, int(config.BALL_HIP_LINE_THICKNESS * font_scale))
 
         # Scale visual elements
         config.INTENTION_LINE_DASH_LENGTH = max(3, int(config.INTENTION_LINE_DASH_LENGTH * resolution_scale))
@@ -1446,17 +1823,18 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
         config.INTENTION_LABEL_OFFSET_Y = int(config.INTENTION_LABEL_OFFSET_Y * resolution_scale)
         config.MOMENTUM_MAX_LENGTH = int(config.MOMENTUM_MAX_LENGTH * resolution_scale)
         config.DIVIDER_LINE_HEIGHT = int(config.DIVIDER_LINE_HEIGHT * resolution_scale)
-        config.CONE_MARKER_SIZE = int(config.CONE_MARKER_SIZE * resolution_scale)
+        config.INTENTION_ARROW_LENGTH = int(config.INTENTION_ARROW_LENGTH * resolution_scale)
+        config.INTENTION_ARROW_OFFSET_Y = int(config.INTENTION_ARROW_OFFSET_Y * resolution_scale)
+        # CONE_MARKER_SIZE scaling removed - using actual bbox from parquet
         config.KEYPOINT_RADIUS = max(2, int(config.KEYPOINT_RADIUS * resolution_scale))
 
-        # Scale turning zone radius
-        zone_config.cone1_zone_radius *= resolution_scale
-        zone_config.cone2_zone_radius *= resolution_scale
-        zone_config.cone3_zone_radius *= resolution_scale
+        # NOTE: Zone radii are NOT scaled here because they must match
+        # the parquet data coordinate space (720p), not video resolution.
+        # The 720p parquet data uses 720p-scaled zone radii (68.0 default).
 
     # Now create turning zones with potentially scaled config
     cone1, cone2, cone3, zone_config = turning_zones_placeholder
-    turning_zones = create_triple_cone_zones(cone1, cone2, cone3, zone_config)
+    turning_zones = create_triple_cone_zones(cone1.center, cone2.center, cone3.center, zone_config)
     print(f"    Zone radius: {zone_config.cone1_zone_radius:.0f}px, stretch_y: {zone_config.stretch_y}")
 
     canvas_width = config.SIDEBAR_WIDTH + orig_width
@@ -1481,6 +1859,7 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
 
     # Initialize trackers
     hip_history: deque = deque(maxlen=config.MOMENTUM_LOOKBACK_FRAMES + 1)
+    ball_history: deque = deque(maxlen=config.MOMENTUM_LOOKBACK_FRAMES + 1)
     turn_tracker = TripleConeTurnTracker()
 
     # Behind counter (momentum-based)
@@ -1501,6 +1880,12 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
     edge_last_side: str = "NONE"
     edge_persist_frames = int(config.EDGE_COUNTER_PERSIST_SECONDS * fps)
 
+    # Ball off-screen tracking (when ball is interpolated / not detected)
+    off_screen_counter: int = 0              # Consecutive frames ball is off-screen
+    return_display_value: int = 0            # Value to show ("was gone X frames")
+    return_display_timer: int = 0            # Frames remaining to show the return counter
+    return_persist_frames = int(config.RETURN_COUNTER_PERSIST_SECONDS * fps)
+
     for frame_id in tqdm(range(total_frames), desc="  Annotating", unit="frame"):
         ret, video_frame = cap.read()
         if not ret:
@@ -1515,8 +1900,14 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
         # Get ball data
         balls = ball_lookup.get(frame_id, [])
         ball_center = None
+        ball_is_off_screen = True  # Assume off-screen until we find a real detection
         for ball in balls:
             if ball['confidence'] >= config.MIN_BBOX_CONFIDENCE:
+                # Check if this is an interpolated (not real) detection
+                is_interpolated = ball.get('interpolated', False)
+                if not is_interpolated:
+                    ball_is_off_screen = False  # Real detection found
+
                 center_x = (ball['x1'] + ball['x2']) / 2
                 center_y = (ball['y1'] + ball['y2']) / 2
                 ball_center = (center_x, center_y)
@@ -1543,6 +1934,12 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
 
         previous_hip = hip_history[0] if len(hip_history) >= 2 else None
 
+        # Update ball history
+        if ball_center and not any(pd.isna(v) for v in ball_center):
+            ball_history.append(ball_center)
+
+        previous_ball = ball_history[0] if len(ball_history) >= 2 else None
+
         # Get movement direction for turn tracking
         movement_direction = None
         if current_hip and previous_hip:
@@ -1554,7 +1951,7 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
 
         # Check turning zone
         active_zone = None
-        if ball_center:
+        if ball_center and not any(pd.isna(v) for v in ball_center):
             active_zone = turning_zones.get_zone_at_point(ball_center[0], ball_center[1])
 
         # Update turn tracker
@@ -1626,6 +2023,20 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
             if edge_display_timer > 0:
                 edge_display_timer -= 1
 
+        # Ball off-screen tracking (interpolated detection)
+        if ball_is_off_screen:
+            off_screen_counter += 1
+        else:
+            if off_screen_counter > 0:
+                # Ball just came back - save how long it was gone
+                return_display_value = off_screen_counter
+                return_display_timer = return_persist_frames
+            off_screen_counter = 0
+
+        # Decrement return display timer (only when ball is on screen)
+        if return_display_timer > 0 and not ball_is_off_screen:
+            return_display_timer -= 1
+
         # === DRAW EVERYTHING ===
 
         # 1. Edge zones (underneath)
@@ -1663,6 +2074,13 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
                 label = f"Ball {ball['confidence']:.2f}"
                 draw_bbox(canvas, ball['x1'], ball['y1'], ball['x2'], ball['y2'],
                          config.BALL_COLOR, label, config, x_offset=config.SIDEBAR_WIDTH)
+
+        # 5.5. Ball momentum arrow
+        if config.DRAW_BALL_MOMENTUM_ARROW and ball_center and previous_ball:
+            draw_ball_momentum_arrow(
+                canvas, ball_center, previous_ball,
+                config, x_offset=config.SIDEBAR_WIDTH
+            )
 
         # 6. Debug axes (always on)
         if config.DRAW_DEBUG_AXES:
@@ -1730,6 +2148,14 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
                 config=config,
                 x_offset=config.SIDEBAR_WIDTH
             )
+
+        # 13. Ball off-screen indicator
+        if config.DRAW_OFF_SCREEN_INDICATOR and ball_is_off_screen:
+            draw_off_screen_indicator(canvas, config, x_offset=config.SIDEBAR_WIDTH)
+
+        # 14. Return counter (how long ball was gone, shown after it returns)
+        if return_display_timer > 0 and not ball_is_off_screen:
+            draw_return_counter(canvas, return_display_value, config, x_offset=config.SIDEBAR_WIDTH)
 
         out.write(canvas)
 
@@ -1867,7 +2293,7 @@ def main():
     parser.add_argument(
         "--resolution", "-r",
         choices=["original", "720p"],
-        default="original",
+        default="720p",
         help="Which resolution to process (720p uses downscaled videos/parquets)"
     )
 

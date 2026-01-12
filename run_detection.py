@@ -42,12 +42,14 @@ except ImportError:
 # ============================================================
 
 # Base directories (using local folders - self-contained)
-VIDEO_DIR = Path(__file__).parent / "videos"
+# Using 720p version by default for faster processing
+VIDEO_DIR = Path(__file__).parent / "videos_720p"
 OUTPUT_BASE = Path(__file__).parent / "output"
 
 # Parquet data directory (local to this project)
 # Structure: PARQUET_BASE / {folder_name} / {folder_name}_football.parquet, etc.
-PARQUET_BASE = Path(__file__).parent / "video_detection_pose_ball_cones"
+# Using 720p version by default for faster processing
+PARQUET_BASE = Path(__file__).parent / "video_detection_pose_ball_cones_720p"
 
 # All available players with their video files
 # Triple Cone drill naming: "Drill_1_Triple cone Turn _dubaiacademy_{player_name}.MOV"
@@ -79,6 +81,24 @@ PLAYERS = {
     "travis_muturi": "Drill_1_Triple cone Turn _dubaiacademy_Travis Muturi.MOV",
     "vincent_brady": "Drill_1_Triple cone Turn _dubaiacademy_Vincent Brady.MOV",
     "yassin_abdullah": "Drill_1_Triple cone Turn _dubaiacademy_Yassin Abdullah.MOV",
+    # Loss videos (with ground truth annotations)
+    "amal_mastan": "Amal Mastan_triple.mp4",
+    "anaya_ahmed": "anaya ahmed_triple.mp4",
+    "arsen_nurtayev": "Arsen Nurtayev_triple.mp4",
+    "benjamin_orhan": "benjamin orhan_triple.mp4",
+    "cadha_boyle": "Cadha Boyle_triple.mp4",
+    "dylan_white": "Dylan White_triple.mp4",
+    "fredrick_mccormack": "fredrick mccormack_triple.mp4",
+    "hind_alassar": "hind Alassar _triple.mp4",
+    "jabr_el_manssouri": "Jabr El Manssouri_triple.mp4",
+    "jaeden_lindley": "jaeden lindley_triple.mp4",
+    "julia_assy": "Julia Assy_triple.mp4",
+    "lui_padraig_conway": "Lui Padraig Conway_triple.mp4",
+    "olivier_fee": "olivier fee_triple.mp4",
+    "omar_farag": "Omar Farag lw_triple.mp4",
+    "raphael_samuel": "Raphael samuel_triple.mp4",
+    "sarah_rashid": "sarah rashid_triple.mp4",
+    "sebastian_bough": "sebastian bough_triple.mp4",
 }
 
 # Options

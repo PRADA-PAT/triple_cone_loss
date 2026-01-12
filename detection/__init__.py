@@ -32,14 +32,12 @@ from .config import (
     PathConfig, VisualizationConfig, DetectionMode
 )
 from .data_loader import (
-    # 3-cone loading (primary)
-    load_triple_cone_layout_from_parquet, load_triple_cone_annotations,
+    # 3-cone loading (parquet only)
+    load_triple_cone_layout_from_parquet,
     # Parquet loading
     load_parquet_data, load_all_data,
     extract_ankle_positions, get_closest_ankle_per_frame,
     validate_data_alignment, get_frame_data, get_video_fps,
-    # Constants
-    EXPECTED_CONE_ROLES
 )
 from .csv_exporter import CSVExporter, export_to_csv
 from .turning_zones import (
@@ -66,9 +64,8 @@ __all__ = [
     # Configuration
     'AppConfig', 'TripleConeDrillConfig', 'DrillType',
     'DetectionConfig', 'PathConfig', 'VisualizationConfig', 'DetectionMode',
-    # Data loading
-    'load_triple_cone_layout_from_parquet', 'load_triple_cone_annotations',
-    'EXPECTED_CONE_ROLES',
+    # Data loading (parquet only)
+    'load_triple_cone_layout_from_parquet',
     'load_parquet_data', 'load_all_data',
     'extract_ankle_positions', 'get_closest_ankle_per_frame',
     'validate_data_alignment', 'get_frame_data', 'get_video_fps',

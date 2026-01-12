@@ -1,28 +1,48 @@
-player_name,event_number,loss_start_frame,loss_start_time
-alex_mochar,0,,
-alfie_bates,0,,
-alonso_carrasco,0,,
-antonio_rodini_attoh,0,,
-essa_ahmed,0,,
-freddie_keilering,0,,
-george_maclachlan,0,,
-isaac_barlow,0,,
-jacobo_fernandez,0,,
-jonty_robbins,0,,
-kingston_robison,0,,
-krill_prokuronov,0,,
-leon_nelson,0,,
-louis_hopps,0,,
-luca_focaccia,0,,
-oliver_rourke,0,,
-quin_rowe,0,,
-rachid_dittrich,0,,
-rayan_khadim,0,,
-robin_staubach,0,,
-sanad_alkhresheh,0,,
-tiernan_cotter,0,,
-timofej_jeckl,0,,
-tise_ogundele,0,,
-travis_muturi,0,,
-vincent_brady,0,,
-yassin_abdullah,0,,
+player_name,event_number,loss_start_frame,loss_start_time,notes
+alex_mochar,0,,,
+alfie_bates,0,,,
+alonso_carrasco,0,,,
+antonio_rodini_attoh,0,,,
+essa_ahmed,0,,,
+freddie_keilering,0,,,
+george_maclachlan,0,,,
+isaac_barlow,0,,,
+jacobo_fernandez,0,,,
+jonty_robbins,0,,,
+kingston_robison,0,,,
+krill_prokuronov,0,,,
+leon_nelson,0,,,
+louis_hopps,0,,,
+luca_focaccia,0,,,
+oliver_rourke,0,,,
+quin_rowe,0,,,
+rachid_dittrich,0,,,
+rayan_khadim,0,,,
+robin_staubach,0,,,
+sanad_alkhresheh,0,,,
+tiernan_cotter,0,,,
+timofej_jeckl,0,,,
+tise_ogundele,0,,,
+travis_muturi,0,,,
+vincent_brady,0,,,
+yassin_abdullah,0,,,
+amal_mastan,1,1020,34.0,crazy overshoot when returning to start cone
+anaya_ahmed,1,840,28.0,turn zone start - missed the turn and shot up the screen
+arsen_nurtayev,1,600,20.0,overshot crazy
+benjamin_orhan,1,270,9.0,ball goes behind and then hit cone
+cadha_boyle,1,900,30.0,missed turn zone cone 1 and goes up the screen
+dylan_white,1,180,6.0,overshoots and misses start cone goes out of bounds
+fredrick_mccormack,1,690,23.0,ball goes behind during turn cones
+fredrick_mccormack,2,870,29.0,during turn ball goes behind him (this one will be hard)
+hind_alassar,1,1080,36.0,goal is to get quickly to start cone since drill is gonna end so they just shoot it
+jabr_el_manssouri,1,210,7.0,just launched it and goes out of bounds - ball distance to foot must be really high
+jaeden_lindley,1,420,14.0,overshoot and misses start cone turn
+jaeden_lindley,2,1110,37.0,no loc but goes ahead and crashes into cone but recovers quickly (cone crash detection needed)
+julia_assy,1,630,21.0,miss start turning cone
+lui_padraig_conway,1,1020,34.0,overshoot and misses turn cone cone 1
+olivier_fee,1,420,14.0,hits the cone and goes out of bounds
+olivier_fee,2,1110,37.0,gives incorrect angle to the ball so has to take longer route
+omar_farag,1,120,4.0,mishits during turn cone 1 and has to take a large radius turn
+raphael_samuel,1,1110,37.0,ball goes behind and player stops
+sarah_rashid,1,780,26.0,misses turning cone 1
+sebastian_bough,1,930,31.0,overshoots and misses start cone goes out of bounds

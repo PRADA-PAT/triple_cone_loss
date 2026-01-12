@@ -47,17 +47,17 @@ class TripleConeDrillConfig:
     cone2_position: Optional[Tuple[float, float]] = None  # CENTER (px, py)
     cone3_position: Optional[Tuple[float, float]] = None  # RIGHT (px, py)
 
-    # Turning zone configuration
-    zone_radius: float = 150.0  # Base radius for all turning zones (pixels)
+    # Turning zone configuration (scaled for 720p / 1280px width)
+    zone_radius: float = 68.0  # Base radius for all turning zones (pixels)
     zone_stretch_x: float = 1.0  # Horizontal stretch factor
     zone_stretch_y: float = 5.0  # Vertical compression for side-view camera
 
-    # Expected cone spacing (from analysis: ~926px between adjacent cones)
-    expected_cone_spacing: float = 926.0  # pixels
-    cone_spacing_tolerance: float = 50.0  # pixels
+    # Expected cone spacing (scaled for 720p: ~421px between adjacent cones)
+    expected_cone_spacing: float = 421.0  # pixels
+    cone_spacing_tolerance: float = 23.0  # pixels
 
     # Cone detection from parquet
-    cone_y_tolerance: float = 30.0  # Max Y deviation for horizontal line validation
+    cone_y_tolerance: float = 14.0  # Max Y deviation for horizontal line validation
 
     def set_cone_positions(
         self,
@@ -108,7 +108,7 @@ class DetectionConfig:
     # Intention-based (face direction) detection settings
     # NOTE: Must match thresholds in video/annotate_triple_cone.py
     use_intention_detection: bool = True  # Enable face-direction-based detection
-    nose_hip_facing_threshold: float = 15.0  # Min nose-hip X diff for facing direction
+    nose_hip_facing_threshold: float = 7.0  # Min nose-hip X diff for facing direction (720p)
     intention_sustained_frames: int = 10  # Frames to confirm intention-based loss
 
 

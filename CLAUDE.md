@@ -25,7 +25,7 @@ CONE1 → CONE2(turn) → CONE1(turn) → CONE3(turn) → CONE1(turn) → repeat
 <==================== FORWARD (player runs right) =========>
 ```
 
-**Important**: Cone positions come from **parquet data** (mean positions across frames), sorted by X position left-to-right as CONE1, CONE2, CONE3. JSON annotation (`cone_annotations.json`) is an alternative source with pre-labeled roles.
+**Important**: Cone positions come from **parquet data** (mean positions across frames), sorted by X position left-to-right as CONE1, CONE2, CONE3.
 
 ## Package Structure
 
@@ -37,19 +37,16 @@ triple_cone_loss/
 │   ├── ball_control_detector.py  # Core detection engine with detect_loss()
 │   ├── triple_cone_detector.py   # 3-cone phase tracking & turn detection
 │   ├── data_structures.py        # Data models, enums, classes
-│   ├── data_loader.py            # Parquet/JSON loading
+│   ├── data_loader.py            # Parquet loading
 │   ├── config.py                 # Configuration classes
 │   ├── csv_exporter.py           # CSV export functionality
 │   └── turning_zones.py          # Elliptical turning zones (CONE1, CONE2, CONE3)
 │
-├── annotation/                   # FOLDER 2: Cone annotation & visualization
-│   ├── cone_annotator.py         # Interactive GUI annotation tool
-│   ├── drill_visualizer.py       # Debug visualization (optional)
-│   └── annotate_cones.py         # Annotation utilities
+├── annotation/                   # FOLDER 2: Visualization tools
+│   └── drill_visualizer.py       # Debug visualization (optional)
 │
 ├── video/                        # FOLDER 3: Video generation with loss events
 │   ├── annotate_triple_cone.py      # PRIMARY: Debug visualization (experimental features)
-│   ├── annotate_with_json_cones.py  # Alternative: JSON-based cone positions
 │   ├── annotate_videos.py           # Basic overlay (parquet cones, no sidebar)
 │   └── drill_event_tracker.py       # Cone crossing & turn event tracking
 │
@@ -91,9 +88,7 @@ PYTHONPATH="." pytest tests/ --cov=detection
 
 ```
 cone.parquet ──> load_triple_cone_layout_from_parquet() ──> TripleConeLayout
-                              OR                                   |
-cone_annotations.json ──> load_triple_cone_annotations()          |
-                                                                   v
+                                                                   |
 ball.parquet ────────────────────────────────────────> BallControlDetector
                                                                    |
 pose.parquet ──> extract_ankle_positions() ────────────────────────|
@@ -126,13 +121,10 @@ pose.parquet ──> extract_ankle_positions() ───────────
 ```python
 # Direct from local detection module (recommended)
 from detection import BallControlDetector, ControlState, AppConfig
-from detection.data_loader import load_triple_cone_layout_from_parquet, load_triple_cone_annotations
+from detection.data_loader import load_triple_cone_layout_from_parquet
 
-# Annotation tools
-from annotation import ConeAnnotator, DrillVisualizer
-
-# Video generation
-from video.annotate_with_json_cones import annotate_video_with_json_cones
+# Visualization tools
+from annotation import DrillVisualizer
 
 # Turning zones (3-cone)
 from detection.turning_zones import create_triple_cone_zones, TripleConeZoneSet, TripleConeZoneConfig
@@ -177,22 +169,9 @@ Key detection thresholds in `DetectionConfig`:
 
 | File | Format | Purpose | Coordinates |
 |------|--------|---------|-------------|
-| `*_cone.parquet` | Parquet | Cone positions (primary source for 3-cone layout) | Pixel + Field |
-| `cone_annotations.json` | JSON | Alternative: pre-labeled cone positions | Pixel (px, py) |
+| `*_cone.parquet` | Parquet | Cone positions (3-cone layout from mean positions) | Pixel + Field |
 | `*_football.parquet` | Parquet | Ball positions per frame | Pixel + Field |
 | `*_pose.parquet` | Parquet | 26 keypoints/person/frame (only ankles used) | Pixel + Field |
-
-**JSON Cone Annotation Format (3-cone):**
-```json
-{
-  "video": "player_name_tc.MOV",
-  "cones": {
-    "cone1": {"px": 467, "py": 801},
-    "cone2": {"px": 1393, "py": 791},
-    "cone3": {"px": 2316, "py": 778}
-  }
-}
-```
 
 **Output CSVs:**
 - `loss_events.csv`: Detected loss events with timestamps and context
@@ -345,7 +324,6 @@ ffmpeg -y -i input.mp4 -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p -mov
 
 **Video annotation scripts:**
 - `video/annotate_triple_cone.py`: **PRIMARY** - Full debug visualization with sidebar, turning zones, momentum arrows, counters. Use this for experimental features.
-- `video/annotate_with_json_cones.py`: Alternative using JSON cone annotations (static positions)
 - `video/annotate_videos.py`: Basic overlay using parquet cone detection (per-frame positions, no sidebar)
 
 ## Generating Annotated Debug Videos
@@ -385,7 +363,6 @@ video_detection_pose_ball_cones/
     {player_name}_tc_football.parquet
     {player_name}_tc_pose.parquet
     {player_name}_tc_cone.parquet
-    cone_annotations.json
 ```
 
 Some players use `{player_name}` without `_tc` suffix - `run_detection.py` handles both conventions.
