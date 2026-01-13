@@ -141,8 +141,8 @@ def get_parquet_paths(player_name: str) -> dict:
             "dir": player_dir,
         }
 
-    # Folder name = video filename without .MOV extension
-    folder_name = video_file.replace(".MOV", "")
+    # Folder name = video filename without extension (.MOV or .mp4)
+    folder_name = video_file.replace(".MOV", "").replace(".mp4", "")
     player_dir = PARQUET_BASE / folder_name
 
     return {

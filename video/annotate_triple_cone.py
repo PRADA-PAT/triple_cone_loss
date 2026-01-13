@@ -158,6 +158,23 @@ class TripleConeAnnotationConfig:
     RETURN_COUNTER_POS_X: int = 50
     RETURN_COUNTER_POS_Y: int = 300  # Below off-screen indicator
 
+    # Unified edge+off-screen tracking (replaces separate edge/off-screen counters)
+    UNIFIED_TRACKING_ENABLED: bool = True  # Use new unified state machine
+    UNIFIED_COUNTER_PERSIST_SECONDS: float = 3.0  # Persist counter after ball returns to normal
+    UNIFIED_COUNTER_FONT_SCALE: float = 1.2
+    UNIFIED_COUNTER_POS_X: int = 50
+    UNIFIED_COUNTER_POS_Y: int = 150  # Same position as old edge counter
+    # Colors for different states
+    UNIFIED_EDGE_COLOR: Tuple[int, int, int] = (0, 200, 255)       # Yellow - ball in edge zone
+    UNIFIED_OFF_SCREEN_COLOR: Tuple[int, int, int] = (0, 0, 255)   # Red - ball off-screen via edge
+    UNIFIED_PERSIST_COLOR: Tuple[int, int, int] = (0, 165, 255)    # Orange - post-return display
+    # Mid-field disappearance (detection failure)
+    SHOW_MID_FIELD_DISAPPEAR: bool = True
+    MID_FIELD_DISAPPEAR_TEXT: str = "DETECTION LOST"
+    MID_FIELD_DISAPPEAR_COLOR: Tuple[int, int, int] = (128, 128, 128)  # Gray
+    MID_FIELD_DISAPPEAR_POS_X: int = 50
+    MID_FIELD_DISAPPEAR_POS_Y: int = 250
+
     # Torso facing direction visualization (intention arrow above head)
     DRAW_TORSO_FACING: bool = True
     NOSE_HIP_FACING_THRESHOLD: float = 15.0  # min nose-hip X diff for facing direction (auto-scaled)
@@ -270,6 +287,18 @@ class EdgeZoneStatus:
     in_edge_zone: bool
     edge_side: str  # "LEFT", "RIGHT", or "NONE"
     distance_to_edge: float
+
+
+from enum import Enum
+
+class BallTrackingState(Enum):
+    """State machine states for unified edge+off-screen tracking."""
+    NORMAL = "NORMAL"                      # Ball visible, not in edge zone
+    EDGE_LEFT = "EDGE_LEFT"                # Ball in left edge zone
+    EDGE_RIGHT = "EDGE_RIGHT"              # Ball in right edge zone
+    OFF_SCREEN_LEFT = "OFF_SCREEN_LEFT"    # Ball left via left edge
+    OFF_SCREEN_RIGHT = "OFF_SCREEN_RIGHT"  # Ball left via right edge
+    DISAPPEARED_MID = "DISAPPEARED_MID"    # Ball disappeared without edge (detection failure)
 
 
 @dataclass
@@ -1291,6 +1320,118 @@ def check_edge_zone_status(
     return EdgeZoneStatus(False, "NONE", min(left_distance, right_distance))
 
 
+def update_ball_tracking_state(
+    current_state: BallTrackingState,
+    ball_visible: bool,
+    edge_status: EdgeZoneStatus,
+) -> Tuple[BallTrackingState, bool]:
+    """
+    State machine for unified edge+off-screen tracking.
+
+    Returns:
+        (new_state, should_reset_counter)
+        - should_reset_counter: True when transitioning to NORMAL or switching sides
+
+    State transitions:
+        NORMAL + ball in left edge → EDGE_LEFT (reset counter)
+        NORMAL + ball in right edge → EDGE_RIGHT (reset counter)
+        NORMAL + ball disappears → DISAPPEARED_MID (no counter)
+
+        EDGE_LEFT + ball disappears → OFF_SCREEN_LEFT (continue counter)
+        EDGE_LEFT + ball leaves edge → NORMAL (reset counter, trigger persist)
+        EDGE_LEFT + ball enters right edge → EDGE_RIGHT (reset counter)
+
+        EDGE_RIGHT + ball disappears → OFF_SCREEN_RIGHT (continue counter)
+        EDGE_RIGHT + ball leaves edge → NORMAL (reset counter, trigger persist)
+        EDGE_RIGHT + ball enters left edge → EDGE_LEFT (reset counter)
+
+        OFF_SCREEN_LEFT + ball returns to left edge → EDGE_LEFT (continue counter)
+        OFF_SCREEN_LEFT + ball returns outside edge → NORMAL (reset, trigger persist)
+        OFF_SCREEN_LEFT + ball returns to right edge → EDGE_RIGHT (reset counter)
+
+        OFF_SCREEN_RIGHT + ball returns to right edge → EDGE_RIGHT (continue counter)
+        OFF_SCREEN_RIGHT + ball returns outside edge → NORMAL (reset, trigger persist)
+        OFF_SCREEN_RIGHT + ball returns to left edge → EDGE_LEFT (reset counter)
+
+        DISAPPEARED_MID + ball returns → check edge status and transition accordingly
+    """
+    # Ball not visible
+    if not ball_visible:
+        if current_state == BallTrackingState.EDGE_LEFT:
+            return (BallTrackingState.OFF_SCREEN_LEFT, False)  # Continue counter
+        elif current_state == BallTrackingState.EDGE_RIGHT:
+            return (BallTrackingState.OFF_SCREEN_RIGHT, False)  # Continue counter
+        elif current_state in (BallTrackingState.OFF_SCREEN_LEFT, BallTrackingState.OFF_SCREEN_RIGHT):
+            return (current_state, False)  # Stay in off-screen state
+        elif current_state == BallTrackingState.DISAPPEARED_MID:
+            return (current_state, False)  # Stay in disappeared mid
+        else:
+            # NORMAL → disappeared mid-field (detection failure)
+            return (BallTrackingState.DISAPPEARED_MID, True)  # Reset counter (no counting for mid-field)
+
+    # Ball is visible
+    in_edge = edge_status.in_edge_zone
+    edge_side = edge_status.edge_side
+
+    if current_state == BallTrackingState.NORMAL:
+        if in_edge:
+            if edge_side == "LEFT":
+                return (BallTrackingState.EDGE_LEFT, True)  # Start new counter
+            else:  # RIGHT
+                return (BallTrackingState.EDGE_RIGHT, True)  # Start new counter
+        return (BallTrackingState.NORMAL, False)  # Stay normal
+
+    elif current_state == BallTrackingState.EDGE_LEFT:
+        if in_edge:
+            if edge_side == "LEFT":
+                return (BallTrackingState.EDGE_LEFT, False)  # Continue counter
+            else:  # Switched to RIGHT
+                return (BallTrackingState.EDGE_RIGHT, True)  # Reset and start right counter
+        else:
+            return (BallTrackingState.NORMAL, True)  # Left edge, trigger persist display
+
+    elif current_state == BallTrackingState.EDGE_RIGHT:
+        if in_edge:
+            if edge_side == "RIGHT":
+                return (BallTrackingState.EDGE_RIGHT, False)  # Continue counter
+            else:  # Switched to LEFT
+                return (BallTrackingState.EDGE_LEFT, True)  # Reset and start left counter
+        else:
+            return (BallTrackingState.NORMAL, True)  # Left edge, trigger persist display
+
+    elif current_state == BallTrackingState.OFF_SCREEN_LEFT:
+        # Ball returned after going off-screen via left edge
+        if in_edge:
+            if edge_side == "LEFT":
+                return (BallTrackingState.EDGE_LEFT, False)  # Continue counter (still in danger)
+            else:  # RIGHT edge
+                return (BallTrackingState.EDGE_RIGHT, True)  # Reset, start new right sequence
+        else:
+            return (BallTrackingState.NORMAL, True)  # Fully recovered, trigger persist
+
+    elif current_state == BallTrackingState.OFF_SCREEN_RIGHT:
+        # Ball returned after going off-screen via right edge
+        if in_edge:
+            if edge_side == "RIGHT":
+                return (BallTrackingState.EDGE_RIGHT, False)  # Continue counter (still in danger)
+            else:  # LEFT edge
+                return (BallTrackingState.EDGE_LEFT, True)  # Reset, start new left sequence
+        else:
+            return (BallTrackingState.NORMAL, True)  # Fully recovered, trigger persist
+
+    elif current_state == BallTrackingState.DISAPPEARED_MID:
+        # Ball returned after mid-field disappearance
+        if in_edge:
+            if edge_side == "LEFT":
+                return (BallTrackingState.EDGE_LEFT, True)  # Start new edge sequence
+            else:  # RIGHT
+                return (BallTrackingState.EDGE_RIGHT, True)  # Start new edge sequence
+        else:
+            return (BallTrackingState.NORMAL, True)  # Return to normal
+
+    return (current_state, False)  # Default: no change
+
+
 def draw_ball_position_indicator(
     frame: np.ndarray,
     ball_center: Optional[Tuple[float, float]],
@@ -1666,6 +1807,82 @@ def draw_return_counter(
                 config.RETURN_COUNTER_FONT_SCALE, config.RETURN_COUNTER_COLOR, thickness, cv2.LINE_AA)
 
 
+def draw_unified_tracking_indicator(
+    frame: np.ndarray,
+    state: BallTrackingState,
+    counter: int,
+    is_persisting: bool,
+    persist_side: str,
+    config: TripleConeAnnotationConfig,
+    x_offset: int = 0
+) -> None:
+    """
+    Draw unified edge+off-screen tracking indicator.
+
+    Displays different text/color based on state:
+    - EDGE_LEFT/RIGHT: "EDGE LEFT: Xf" / "EDGE RIGHT: Xf" (yellow)
+    - OFF_SCREEN_LEFT/RIGHT: "LEFT EDGE + OFF: Xf" / "RIGHT EDGE + OFF: Xf" (red)
+    - Persisting after return: "WAS LEFT: Xf" / "WAS RIGHT: Xf" (orange)
+    - DISAPPEARED_MID: "DETECTION LOST" (gray) - no counter
+
+    Args:
+        frame: Video frame to draw on
+        state: Current BallTrackingState
+        counter: Number of frames in current state sequence
+        is_persisting: True when showing persist display after returning to normal
+        persist_side: "LEFT" or "RIGHT" - which side the ball exited from (for persist display)
+        config: Annotation configuration
+        x_offset: Horizontal offset (for sidebar)
+    """
+    # Determine text and color based on state
+    text = ""
+    color = config.UNIFIED_EDGE_COLOR
+    pos_x = x_offset + config.UNIFIED_COUNTER_POS_X
+    pos_y = config.UNIFIED_COUNTER_POS_Y
+
+    if state == BallTrackingState.EDGE_LEFT:
+        text = f"EDGE LEFT: {counter}f"
+        color = config.UNIFIED_EDGE_COLOR
+    elif state == BallTrackingState.EDGE_RIGHT:
+        text = f"EDGE RIGHT: {counter}f"
+        color = config.UNIFIED_EDGE_COLOR
+    elif state == BallTrackingState.OFF_SCREEN_LEFT:
+        text = f"LEFT EDGE + OFF: {counter}f"
+        color = config.UNIFIED_OFF_SCREEN_COLOR
+    elif state == BallTrackingState.OFF_SCREEN_RIGHT:
+        text = f"RIGHT EDGE + OFF: {counter}f"
+        color = config.UNIFIED_OFF_SCREEN_COLOR
+    elif state == BallTrackingState.DISAPPEARED_MID:
+        # Mid-field disappearance - show different indicator
+        text = config.MID_FIELD_DISAPPEAR_TEXT
+        color = config.MID_FIELD_DISAPPEAR_COLOR
+        pos_x = x_offset + config.MID_FIELD_DISAPPEAR_POS_X
+        pos_y = config.MID_FIELD_DISAPPEAR_POS_Y
+    elif is_persisting and counter > 0:
+        # Persist display after returning to normal
+        text = f"WAS {persist_side}: {counter}f"
+        color = config.UNIFIED_PERSIST_COLOR
+    else:
+        return  # Nothing to draw (NORMAL state with no persist)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = config.UNIFIED_COUNTER_FONT_SCALE
+    thickness = max(1, int(2 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+    (tw, th), _ = cv2.getTextSize(text, font, font_scale, thickness)
+
+    # Scale padding proportionally
+    pad_x = max(2, int(5 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+    pad_y = max(4, int(10 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+
+    # Draw background box
+    cv2.rectangle(frame, (pos_x - pad_x, pos_y - th - pad_y),
+                  (pos_x + tw + pad_x * 2, pos_y + pad_y), (0, 0, 0), -1)
+
+    # Draw text
+    cv2.putText(frame, text, (pos_x, pos_y), font,
+                font_scale, color, thickness, cv2.LINE_AA)
+
+
 def draw_debug_axes(
     frame: np.ndarray,
     ball_center: Optional[Tuple[float, float]],
@@ -1873,18 +2090,26 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
     intention_behind_display_value: int = 0
     intention_behind_display_timer: int = 0
 
-    # Edge counter
+    # Legacy edge counter (kept for backward compatibility when UNIFIED_TRACKING_ENABLED=False)
     edge_counter: int = 0
     edge_display_value: int = 0
     edge_display_timer: int = 0
     edge_last_side: str = "NONE"
     edge_persist_frames = int(config.EDGE_COUNTER_PERSIST_SECONDS * fps)
 
-    # Ball off-screen tracking (when ball is interpolated / not detected)
-    off_screen_counter: int = 0              # Consecutive frames ball is off-screen
-    return_display_value: int = 0            # Value to show ("was gone X frames")
-    return_display_timer: int = 0            # Frames remaining to show the return counter
+    # Legacy ball off-screen tracking (kept for backward compatibility)
+    off_screen_counter: int = 0
+    return_display_value: int = 0
+    return_display_timer: int = 0
     return_persist_frames = int(config.RETURN_COUNTER_PERSIST_SECONDS * fps)
+
+    # Unified edge+off-screen tracking (new state machine)
+    unified_tracking_state: BallTrackingState = BallTrackingState.NORMAL
+    unified_counter: int = 0                    # Continuous counter for edge+off-screen sequence
+    unified_persist_value: int = 0              # Counter value to show during persist display
+    unified_persist_timer: int = 0              # Frames remaining for persist display
+    unified_persist_side: str = "NONE"          # Which side ball exited from (for persist text)
+    unified_persist_frames = int(config.UNIFIED_COUNTER_PERSIST_SECONDS * fps)
 
     for frame_id in tqdm(range(total_frames), desc="  Annotating", unit="frame"):
         ret, video_frame = cap.read()
@@ -2008,44 +2233,78 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
         ball_x = ball_center[0] if ball_center else None
         edge_status = check_edge_zone_status(ball_x, orig_width, config)
 
-        if edge_status.in_edge_zone:
-            if edge_last_side != "NONE" and edge_last_side != edge_status.edge_side:
-                edge_counter = 1
-            else:
-                edge_counter += 1
-            edge_display_value = edge_counter
-            edge_last_side = edge_status.edge_side
-            edge_display_timer = edge_persist_frames
+        if config.UNIFIED_TRACKING_ENABLED:
+            # === NEW UNIFIED STATE MACHINE ===
+            # Get previous state for detecting transitions
+            prev_state = unified_tracking_state
+
+            # Update state machine
+            # ball_visible = not ball_is_off_screen (ball was actually detected, not interpolated)
+            ball_visible = not ball_is_off_screen
+            new_state, should_reset = update_ball_tracking_state(
+                unified_tracking_state, ball_visible, edge_status
+            )
+
+            # Handle counter updates based on state transition
+            if should_reset:
+                # Check if we're transitioning TO normal (trigger persist)
+                if new_state == BallTrackingState.NORMAL and prev_state != BallTrackingState.NORMAL:
+                    # Save counter value and which side for persist display
+                    unified_persist_value = unified_counter
+                    unified_persist_timer = unified_persist_frames
+                    # Determine which side we came from
+                    if prev_state in (BallTrackingState.EDGE_LEFT, BallTrackingState.OFF_SCREEN_LEFT):
+                        unified_persist_side = "LEFT"
+                    elif prev_state in (BallTrackingState.EDGE_RIGHT, BallTrackingState.OFF_SCREEN_RIGHT):
+                        unified_persist_side = "RIGHT"
+                # Reset counter for new sequence
+                unified_counter = 0
+
+            # Increment counter for active states (edge or off-screen)
+            if new_state in (BallTrackingState.EDGE_LEFT, BallTrackingState.EDGE_RIGHT,
+                            BallTrackingState.OFF_SCREEN_LEFT, BallTrackingState.OFF_SCREEN_RIGHT):
+                unified_counter += 1
+
+            unified_tracking_state = new_state
+
+            # Decrement persist timer when in NORMAL state
+            if unified_tracking_state == BallTrackingState.NORMAL and unified_persist_timer > 0:
+                unified_persist_timer -= 1
+
         else:
-            if edge_counter > 0:
+            # === LEGACY SEPARATE COUNTERS (backward compatibility) ===
+            if edge_status.in_edge_zone:
+                if edge_last_side != "NONE" and edge_last_side != edge_status.edge_side:
+                    edge_counter = 1
+                else:
+                    edge_counter += 1
+                edge_display_value = edge_counter
+                edge_last_side = edge_status.edge_side
                 edge_display_timer = edge_persist_frames
-            edge_counter = 0
-            if edge_display_timer > 0:
-                edge_display_timer -= 1
+            else:
+                if edge_counter > 0:
+                    edge_display_timer = edge_persist_frames
+                edge_counter = 0
+                if edge_display_timer > 0:
+                    edge_display_timer -= 1
 
-        # Ball off-screen tracking (interpolated detection)
-        if ball_is_off_screen:
-            off_screen_counter += 1
-        else:
-            if off_screen_counter > 0:
-                # Ball just came back - save how long it was gone
-                return_display_value = off_screen_counter
-                return_display_timer = return_persist_frames
-            off_screen_counter = 0
+            # Ball off-screen tracking (interpolated detection)
+            if ball_is_off_screen:
+                off_screen_counter += 1
+            else:
+                if off_screen_counter > 0:
+                    # Ball just came back - save how long it was gone
+                    return_display_value = off_screen_counter
+                    return_display_timer = return_persist_frames
+                off_screen_counter = 0
 
-        # Decrement return display timer (only when ball is on screen)
-        if return_display_timer > 0 and not ball_is_off_screen:
-            return_display_timer -= 1
+            # Decrement return display timer (only when ball is on screen)
+            if return_display_timer > 0 and not ball_is_off_screen:
+                return_display_timer -= 1
 
         # === DRAW EVERYTHING ===
 
-        # 1. Edge zones (underneath)
-        canvas = draw_edge_zones(
-            canvas, orig_width, orig_height, config,
-            x_offset=config.SIDEBAR_WIDTH
-        )
-
-        # 2. Turning zones (3 zones)
+        # 1. Turning zones (3 zones) - draw first so edge zones appear on top
         draw_triple_cone_zones(
             canvas, turning_zones, ball_center,
             x_offset=config.SIDEBAR_WIDTH,
@@ -2054,6 +2313,12 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
             cone3_color=config.CONE3_ZONE_COLOR,
             highlight_color=config.ZONE_HIGHLIGHT_COLOR,
             alpha=config.ZONE_ALPHA,
+        )
+
+        # 2. Edge zones (on top of turning zones so they're visible)
+        canvas = draw_edge_zones(
+            canvas, orig_width, orig_height, config,
+            x_offset=config.SIDEBAR_WIDTH
         )
 
         # 3. Sidebar
@@ -2130,15 +2395,37 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
                 x_offset=config.SIDEBAR_WIDTH
             )
 
-        # 11. Edge counter
-        if edge_display_timer > 0 or edge_counter > 0:
-            draw_edge_counter(
-                canvas, edge_display_value,
-                is_active=(edge_counter > 0),
-                edge_side=edge_last_side,
-                config=config,
-                x_offset=config.SIDEBAR_WIDTH
+        # 11. Edge counter / Unified tracking indicator
+        if config.UNIFIED_TRACKING_ENABLED:
+            # New unified tracking indicator
+            # Show if: in active state, or persisting after return
+            is_active_state = unified_tracking_state in (
+                BallTrackingState.EDGE_LEFT, BallTrackingState.EDGE_RIGHT,
+                BallTrackingState.OFF_SCREEN_LEFT, BallTrackingState.OFF_SCREEN_RIGHT,
+                BallTrackingState.DISAPPEARED_MID
             )
+            is_persisting = unified_tracking_state == BallTrackingState.NORMAL and unified_persist_timer > 0
+
+            if is_active_state or is_persisting:
+                draw_unified_tracking_indicator(
+                    canvas,
+                    state=unified_tracking_state,
+                    counter=unified_counter if is_active_state else unified_persist_value,
+                    is_persisting=is_persisting,
+                    persist_side=unified_persist_side,
+                    config=config,
+                    x_offset=config.SIDEBAR_WIDTH
+                )
+        else:
+            # Legacy edge counter
+            if edge_display_timer > 0 or edge_counter > 0:
+                draw_edge_counter(
+                    canvas, edge_display_value,
+                    is_active=(edge_counter > 0),
+                    edge_side=edge_last_side,
+                    config=config,
+                    x_offset=config.SIDEBAR_WIDTH
+                )
 
         # 12. Intention behind counter
         if intention_behind_display_timer > 0 or intention_behind_counter > 0:
@@ -2149,13 +2436,15 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
                 x_offset=config.SIDEBAR_WIDTH
             )
 
-        # 13. Ball off-screen indicator
-        if config.DRAW_OFF_SCREEN_INDICATOR and ball_is_off_screen:
-            draw_off_screen_indicator(canvas, config, x_offset=config.SIDEBAR_WIDTH)
+        # 13. Ball off-screen indicator (legacy - only when unified tracking disabled)
+        if not config.UNIFIED_TRACKING_ENABLED:
+            if config.DRAW_OFF_SCREEN_INDICATOR and ball_is_off_screen:
+                draw_off_screen_indicator(canvas, config, x_offset=config.SIDEBAR_WIDTH)
 
-        # 14. Return counter (how long ball was gone, shown after it returns)
-        if return_display_timer > 0 and not ball_is_off_screen:
-            draw_return_counter(canvas, return_display_value, config, x_offset=config.SIDEBAR_WIDTH)
+        # 14. Return counter (legacy - only when unified tracking disabled)
+        if not config.UNIFIED_TRACKING_ENABLED:
+            if return_display_timer > 0 and not ball_is_off_screen:
+                draw_return_counter(canvas, return_display_value, config, x_offset=config.SIDEBAR_WIDTH)
 
         out.write(canvas)
 
@@ -2319,7 +2608,6 @@ def main():
 
     if args.all:
         print(f"\n Processing ALL {len(available)} Triple Cone videos...\n")
-        config = TripleConeAnnotationConfig()
 
         success_count = 0
         skip_count = 0
@@ -2337,6 +2625,8 @@ def main():
             print(f"[{i}/{len(available)}] Processing: {name}")
             print(f"{'='*60}")
 
+            # Create fresh config for each video to avoid cumulative scaling
+            config = TripleConeAnnotationConfig()
             success = annotate_triple_cone_video(video_path, parquet_path, output_path, config)
 
             if success:

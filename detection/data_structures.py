@@ -50,6 +50,28 @@ class DrillDirection(Enum):
     STATIONARY = "stationary"
 
 
+class BallTrackingState(Enum):
+    """
+    State machine states for unified edge/off-screen tracking.
+
+    Used for boundary violation detection. The key insight is that ball
+    detection disappears (interpolated=True) when ball goes off-screen,
+    rather than being "stuck" at the edge.
+
+    State transitions:
+        NORMAL → EDGE_LEFT/RIGHT (ball enters edge zone)
+        EDGE_LEFT/RIGHT → OFF_SCREEN_LEFT/RIGHT (ball disappears)
+        OFF_SCREEN_LEFT/RIGHT → NORMAL (ball returns)
+        NORMAL → DISAPPEARED_MID (ball disappears mid-field - detection failure)
+    """
+    NORMAL = "NORMAL"                      # Ball visible, not in edge zone
+    EDGE_LEFT = "EDGE_LEFT"                # Ball in left edge zone
+    EDGE_RIGHT = "EDGE_RIGHT"              # Ball in right edge zone
+    OFF_SCREEN_LEFT = "OFF_SCREEN_LEFT"    # Ball left via left edge
+    OFF_SCREEN_RIGHT = "OFF_SCREEN_RIGHT"  # Ball left via right edge
+    DISAPPEARED_MID = "DISAPPEARED_MID"    # Ball disappeared mid-field (detection failure)
+
+
 # =============================================================================
 # TRIPLE CONE DRILL STRUCTURES (3-CONE)
 # =============================================================================
@@ -233,6 +255,9 @@ class FrameData:
 
     # Ball tracking quality (for filtering false positives)
     ball_interpolated: bool = False  # True if ball position is interpolated
+
+    # Ball tracking state (for boundary violation detection)
+    ball_tracking_state: Optional['BallTrackingState'] = None
 
     # Intention-based (face direction) ball position detection
     nose_x: Optional[float] = None  # Nose pixel X coordinate

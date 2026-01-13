@@ -440,13 +440,545 @@ def create_test_result(
     )
 
 
+# =============================================================================
+# Report Generation Helper Functions
+# =============================================================================
+
+def _format_ascii_table(headers: List[str], rows: List[List[str]], min_widths: Optional[List[int]] = None) -> str:
+    """
+    Format data as ASCII table with aligned columns.
+
+    Args:
+        headers: Column header names
+        rows: List of rows, each row is a list of cell values
+        min_widths: Optional minimum column widths
+
+    Returns:
+        Formatted ASCII table string
+    """
+    if not rows:
+        return ""
+
+    # Calculate column widths
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            if i < len(widths):
+                widths[i] = max(widths[i], len(str(cell)))
+
+    # Apply minimum widths if provided
+    if min_widths:
+        for i, mw in enumerate(min_widths):
+            if i < len(widths):
+                widths[i] = max(widths[i], mw)
+
+    # Build table
+    lines = []
+
+    # Header row
+    header_line = "| " + " | ".join(h.ljust(widths[i]) for i, h in enumerate(headers)) + " |"
+    separator = "|" + "|".join("-" * (w + 2) for w in widths) + "|"
+
+    lines.append(header_line)
+    lines.append(separator)
+
+    # Data rows
+    for row in rows:
+        row_cells = []
+        for i, cell in enumerate(row):
+            if i < len(widths):
+                row_cells.append(str(cell).ljust(widths[i]))
+        lines.append("| " + " | ".join(row_cells) + " |")
+
+    return "\n".join(lines)
+
+
+def _categorize_false_positives(
+    all_results: Dict[str, 'TestResult'],
+    frame_tolerance: int = DEFAULT_FRAME_TOLERANCE
+) -> Dict[str, List[Tuple[str, 'DetectedEventInfo']]]:
+    """
+    Categorize false positives across all players into categories.
+
+    Categories:
+    - detection_errors: Very long duration (>5s) - likely algorithm issues
+    - tolerance_mismatch: Close to a GT event but outside tolerance window
+    - unclassified: Require manual review
+
+    Args:
+        all_results: Dict of player_name -> TestResult
+        frame_tolerance: Frame tolerance used for matching
+
+    Returns:
+        Dict with keys 'detection_errors', 'tolerance_mismatch', 'unclassified'
+        Each value is list of (player_name, DetectedEventInfo) tuples
+    """
+    categorized = {
+        'detection_errors': [],
+        'tolerance_mismatch': [],
+        'unclassified': []
+    }
+
+    extended_tolerance = frame_tolerance * 2  # e.g., 90 frames for tolerance_mismatch check
+
+    for player_name, result in all_results.items():
+        for fp in result.false_positives:
+            # Check if this FP is close to any GT event (tolerance mismatch)
+            is_tolerance_mismatch = False
+            for gt_event in result.ground_truth_events:
+                if gt_event.frame is not None and fp.start_frame is not None:
+                    diff = abs(fp.start_frame - gt_event.frame)
+                    if frame_tolerance < diff <= extended_tolerance:
+                        is_tolerance_mismatch = True
+                        break
+
+            if is_tolerance_mismatch:
+                categorized['tolerance_mismatch'].append((player_name, fp))
+            elif fp.duration_seconds > 5.0:
+                # Very long detections are likely algorithm errors
+                categorized['detection_errors'].append((player_name, fp))
+            else:
+                categorized['unclassified'].append((player_name, fp))
+
+    return categorized
+
+
+def _generate_executive_summary(summary: 'OverallTestSummary') -> List[str]:
+    """Generate executive summary section."""
+    lines = []
+
+    lines.append("=" * 80)
+    lines.append("1. EXECUTIVE SUMMARY")
+    lines.append("=" * 80)
+    lines.append("")
+    lines.append("The Ball Control Detection System analyzes Triple Cone drill videos to detect")
+    lines.append("when a player loses control of the ball. Two types of loss events are detected:")
+    lines.append("")
+    lines.append("  - BALL_BEHIND    : Ball stays behind player relative to movement direction")
+    lines.append("  - OUT_OF_BOUNDS  : Ball exits video frame (boundary violation)")
+    lines.append("")
+    lines.append("CURRENT PERFORMANCE:")
+    lines.append("-" * 40)
+    lines.append(f"  F1 Score:     {summary.overall_f1*100:.1f}%")
+    lines.append(f"  Precision:    {summary.overall_precision*100:.1f}%")
+    lines.append(f"  Recall:       {summary.overall_recall*100:.1f}%")
+    lines.append("")
+    lines.append(f"  True Positives:   {summary.total_true_positives}")
+    lines.append(f"  False Positives:  {summary.total_false_positives}")
+    lines.append(f"  False Negatives:  {summary.total_false_negatives}")
+    lines.append("")
+
+    return lines
+
+
+def _generate_detection_config_section() -> List[str]:
+    """Generate detection configuration section with current thresholds."""
+    lines = []
+
+    lines.append("=" * 80)
+    lines.append("2. DETECTION CONFIGURATION")
+    lines.append("=" * 80)
+    lines.append("")
+    lines.append("BALL-BEHIND DETECTION:")
+    lines.append("  - Behind Threshold:        20.0 pixels (ball must be this far behind hip)")
+    lines.append("  - Sustained Frames:        10 frames (~0.33s at 30fps)")
+    lines.append("  - Movement Threshold:      3.0 pixels (min hip movement for direction)")
+    lines.append("  - Direction Consistency:   70% (required for sustained detection)")
+    lines.append("")
+    lines.append("BOUNDARY DETECTION:")
+    lines.append("  - Edge Margin:             50 pixels")
+    lines.append("  - Min Timestamp:           3.0 seconds (skip early frames)")
+    lines.append("")
+    lines.append("EVENT FILTERING:")
+    lines.append("  - Min Event Duration:      15 frames (~0.5s at 30fps)")
+    lines.append("")
+    lines.append("TURNING ZONES (Detection Suppressed):")
+    lines.append("  - Zone Radius:             68px base radius (elliptical)")
+    lines.append("  - Y Stretch Factor:        5.0x (for camera perspective)")
+    lines.append("")
+
+    return lines
+
+
+def _generate_performance_metrics(summary: 'OverallTestSummary') -> List[str]:
+    """Generate performance metrics section with type breakdown."""
+    lines = []
+
+    lines.append("=" * 80)
+    lines.append("3. PERFORMANCE METRICS")
+    lines.append("=" * 80)
+    lines.append("")
+
+    # Calculate type breakdown
+    summary.calculate_type_breakdown()
+
+    if summary.total_by_type:
+        lines.append("DETECTION TYPE BREAKDOWN:")
+        lines.append("-" * 40)
+        for type_name in sorted(summary.total_by_type.keys()):
+            total = summary.total_by_type.get(type_name, 0)
+            tp = summary.tp_by_type.get(type_name, 0)
+            fp = summary.fp_by_type.get(type_name, 0)
+
+            # Calculate precision for this type
+            if tp + fp > 0:
+                type_precision = (tp / (tp + fp)) * 100
+            else:
+                type_precision = 0.0
+
+            lines.append(f"  {type_name}:")
+            lines.append(f"    Total Detected:    {total}")
+            lines.append(f"    True Positives:    {tp}")
+            lines.append(f"    False Positives:   {fp}")
+            lines.append(f"    Type Precision:    {type_precision:.1f}%")
+            lines.append("")
+
+    # Player performance distribution
+    perfect = 0
+    partial = 0
+    no_detection = 0
+    fp_only = 0
+
+    for result in summary.per_player_results.values():
+        if result.f1_score == 1.0 and result.ground_truth_count > 0:
+            perfect += 1
+        elif result.f1_score == 1.0 and result.ground_truth_count == 0 and result.detected_count == 0:
+            perfect += 1  # Clean run correctly detected
+        elif 0 < result.f1_score < 1.0:
+            partial += 1
+        elif result.f1_score == 0 and result.detected_count > 0 and result.ground_truth_count == 0:
+            fp_only += 1
+        elif result.f1_score == 0:
+            no_detection += 1
+
+    lines.append("PLAYER PERFORMANCE DISTRIBUTION:")
+    lines.append("-" * 40)
+    lines.append(f"  Perfect Detection (100% F1):  {perfect} players")
+    lines.append(f"  Partial Detection:            {partial} players")
+    lines.append(f"  No Detection:                 {no_detection} players")
+    lines.append(f"  False Positives Only:         {fp_only} players")
+    lines.append("")
+
+    return lines
+
+
+def _generate_fp_analysis_section(
+    results: Dict[str, 'TestResult'],
+    frame_tolerance: int = DEFAULT_FRAME_TOLERANCE
+) -> List[str]:
+    """Generate categorized false positives analysis section."""
+    lines = []
+
+    lines.append("=" * 80)
+    lines.append("4. FALSE POSITIVES ANALYSIS")
+    lines.append("=" * 80)
+    lines.append("")
+
+    # Count total FPs
+    total_fp = sum(len(r.false_positives) for r in results.values())
+    lines.append(f"Total False Positives: {total_fp}")
+    lines.append("")
+
+    # Categorize FPs
+    categorized = _categorize_false_positives(results, frame_tolerance)
+
+    lines.append("CATEGORIZATION:")
+    lines.append("-" * 40)
+    lines.append("")
+
+    # [A] Detection Errors
+    lines.append("[A] DETECTION ERRORS (Algorithm Issues) - {} events".format(
+        len(categorized['detection_errors'])))
+    lines.append("=" * 60)
+    lines.append("These are incorrectly detected events due to algorithm limitations.")
+    lines.append("")
+
+    if categorized['detection_errors']:
+        headers = ["Player", "Time", "Type", "Duration", "Issue"]
+        rows = []
+        for player_name, fp in categorized['detection_errors']:
+            rows.append([
+                player_name.upper(),
+                f"{fp.timestamp:.1f}s",
+                fp.event_type_name,
+                f"{fp.duration_seconds:.1f}s",
+                "Long duration detection"
+            ])
+        lines.append(_format_ascii_table(headers, rows))
+    else:
+        lines.append("None detected.")
+    lines.append("")
+
+    # [B] Tolerance Mismatch
+    lines.append("[B] TOLERANCE MISMATCH - {} events".format(
+        len(categorized['tolerance_mismatch'])))
+    lines.append("=" * 60)
+    lines.append("Events detected but outside the tolerance window.")
+    lines.append("")
+
+    if categorized['tolerance_mismatch']:
+        headers = ["Player", "Time", "Type", "Duration"]
+        rows = []
+        for player_name, fp in categorized['tolerance_mismatch']:
+            rows.append([
+                player_name.upper(),
+                f"{fp.timestamp:.1f}s",
+                fp.event_type_name,
+                f"{fp.duration_seconds:.1f}s"
+            ])
+        lines.append(_format_ascii_table(headers, rows))
+    else:
+        lines.append("None detected.")
+    lines.append("")
+
+    # [C] Unclassified
+    lines.append("[C] UNCLASSIFIED - {} events".format(
+        len(categorized['unclassified'])))
+    lines.append("=" * 60)
+    lines.append("Require manual video review to determine cause.")
+    lines.append("")
+
+    if categorized['unclassified']:
+        headers = ["Player", "Time", "Type", "Duration"]
+        rows = []
+        for player_name, fp in categorized['unclassified']:
+            rows.append([
+                player_name.upper(),
+                f"{fp.timestamp:.1f}s",
+                fp.event_type_name,
+                f"{fp.duration_seconds:.1f}s"
+            ])
+        lines.append(_format_ascii_table(headers, rows))
+    else:
+        lines.append("None detected.")
+    lines.append("")
+
+    return lines
+
+
+def _generate_fn_analysis_section(results: Dict[str, 'TestResult']) -> List[str]:
+    """Generate false negatives analysis section with reasons."""
+    lines = []
+
+    lines.append("=" * 80)
+    lines.append("5. FALSE NEGATIVES ANALYSIS")
+    lines.append("=" * 80)
+    lines.append("")
+
+    # Collect all FNs
+    all_fns = []
+    for player_name, result in results.items():
+        for fn in result.false_negatives:
+            all_fns.append((player_name, fn))
+
+    lines.append(f"Total False Negatives: {len(all_fns)}")
+    lines.append("")
+
+    if all_fns:
+        lines.append("MISSED EVENTS:")
+        lines.append("-" * 40)
+        lines.append("")
+
+        headers = ["Player", "GT Frame", "GT Time", "Possible Reason"]
+        rows = []
+        for player_name, fn in all_fns:
+            frame_str = str(fn.frame) if fn.frame is not None else "?"
+            time_str = f"{fn.timestamp:.1f}s" if fn.timestamp is not None else "?"
+            # Heuristic reason based on timestamp
+            reason = "Requires review"
+            if fn.timestamp is not None:
+                if fn.timestamp < 5.0:
+                    reason = "Early in video (startup)"
+                elif fn.timestamp > 35.0:
+                    reason = "Late in video (drill ending)"
+
+            rows.append([
+                player_name.upper(),
+                frame_str,
+                time_str,
+                reason
+            ])
+
+        lines.append(_format_ascii_table(headers, rows))
+    else:
+        lines.append("No missed events - all ground truth events were detected!")
+    lines.append("")
+
+    return lines
+
+
+def _generate_known_issues_section() -> List[str]:
+    """Generate known issues and bugs section."""
+    lines = []
+
+    lines.append("=" * 80)
+    lines.append("6. KNOWN ISSUES & BUGS")
+    lines.append("=" * 80)
+    lines.append("")
+
+    lines.append("[ISSUE-001] TURNING ZONE SUPPRESSION")
+    lines.append("-" * 40)
+    lines.append("Severity: Medium")
+    lines.append("Status: Under Review")
+    lines.append("")
+    lines.append("Description:")
+    lines.append("  Some valid loss events inside turning zones may be suppressed.")
+    lines.append("  The elliptical zones around cones filter out detections that")
+    lines.append("  occur during expected tight turns.")
+    lines.append("")
+    lines.append("Mitigation:")
+    lines.append("  Review false negatives that occur near cone positions.")
+    lines.append("")
+
+    lines.append("[ISSUE-002] BALL-BEHIND DIRECTION SENSITIVITY")
+    lines.append("-" * 40)
+    lines.append("Severity: Low")
+    lines.append("Status: Monitoring")
+    lines.append("")
+    lines.append("Description:")
+    lines.append("  Ball-behind detection relies on hip movement direction.")
+    lines.append("  Brief stationary moments can affect direction calculation.")
+    lines.append("")
+
+    return lines
+
+
+def _generate_recommendations_section(
+    summary: 'OverallTestSummary',
+    categorized_fps: Dict[str, List]
+) -> List[str]:
+    """Generate recommendations based on test results."""
+    lines = []
+
+    lines.append("=" * 80)
+    lines.append("7. RECOMMENDATIONS")
+    lines.append("=" * 80)
+    lines.append("")
+
+    lines.append("IMMEDIATE ACTIONS:")
+    lines.append("-" * 40)
+
+    # Dynamic recommendations based on results
+    if len(categorized_fps.get('detection_errors', [])) > 0:
+        lines.append("1. Review long-duration false positives for algorithm tuning")
+
+    if summary.total_false_negatives > 0:
+        lines.append("2. Analyze missed events - check if inside turning zones")
+
+    if summary.overall_precision < 0.5:
+        lines.append("3. Consider increasing detection thresholds to reduce false positives")
+
+    if summary.overall_recall < 0.7:
+        lines.append("4. Review detection sensitivity - may be missing valid events")
+
+    lines.append("")
+
+    lines.append("DETECTION IMPROVEMENTS:")
+    lines.append("-" * 40)
+    lines.append("1. Consider adaptive thresholds based on player speed")
+    lines.append("2. Add ball trajectory analysis for edge cases")
+    lines.append("3. Implement velocity-based confirmation for ball-behind detection")
+    lines.append("")
+
+    lines.append("GROUND TRUTH UPDATES NEEDED:")
+    lines.append("-" * 40)
+    lines.append("Review unclassified false positives - some may be valid events")
+    lines.append("that should be added to ground truth.")
+    lines.append("")
+
+    return lines
+
+
+def _generate_detailed_results_by_category(results: Dict[str, 'TestResult']) -> List[str]:
+    """Generate player results grouped by performance category."""
+    lines = []
+
+    lines.append("=" * 80)
+    lines.append("8. DETAILED PLAYER RESULTS")
+    lines.append("=" * 80)
+    lines.append("")
+
+    # Categorize players
+    perfect = []
+    partial = []
+    no_tp = []
+
+    for player_name, result in sorted(results.items()):
+        if result.f1_score == 1.0:
+            perfect.append((player_name, result))
+        elif result.f1_score > 0:
+            partial.append((player_name, result))
+        else:
+            no_tp.append((player_name, result))
+
+    # Perfect Detection
+    lines.append("PERFECT DETECTION (F1 = 100%):")
+    lines.append("-" * 40)
+    if perfect:
+        for player_name, result in perfect:
+            if result.ground_truth_count == 0 and result.detected_count == 0:
+                lines.append(f"  - {player_name.upper()}: No events (correctly detected as clean run)")
+            else:
+                for match in result.true_positives:
+                    gt_time = f"{match.ground_truth_time:.1f}s" if match.ground_truth_time else "?"
+                    det_time = f"{match.detected_time:.1f}s"
+                    lines.append(
+                        f"  - {player_name.upper()}: GT: {gt_time} -> Detected: {det_time} "
+                        f"[{match.event_type_name}]"
+                    )
+    else:
+        lines.append("  None")
+    lines.append("")
+
+    # Partial Detection
+    lines.append("PARTIAL DETECTION (0% < F1 < 100%):")
+    lines.append("-" * 40)
+    if partial:
+        for player_name, result in partial:
+            tp_count = len(result.true_positives)
+            fp_count = len(result.false_positives)
+            fn_count = len(result.false_negatives)
+            lines.append(
+                f"  - {player_name.upper()}: F1: {result.f1_score*100:.1f}% "
+                f"({tp_count} TP, {fp_count} FP, {fn_count} FN)"
+            )
+    else:
+        lines.append("  None")
+    lines.append("")
+
+    # No True Positives
+    lines.append("NO TRUE POSITIVES (F1 = 0%):")
+    lines.append("-" * 40)
+    if no_tp:
+        for player_name, result in no_tp:
+            fp_count = len(result.false_positives)
+            fn_count = len(result.false_negatives)
+            lines.append(f"  - {player_name.upper()}: {fp_count} FP, {fn_count} FN")
+    else:
+        lines.append("  None")
+    lines.append("")
+
+    return lines
+
+
 def generate_report(
     results: Dict[str, TestResult],
     summary: OverallTestSummary,
     frame_tolerance: int = DEFAULT_FRAME_TOLERANCE
 ) -> str:
     """
-    Generate formatted test report string with detailed event type breakdown.
+    Generate comprehensive test report with executive summary and per-player details.
+
+    Report structure (matching f8_loss format):
+    1. Executive Summary - Overall metrics at a glance
+    2. Detection Configuration - All threshold values
+    3. Performance Metrics - Type breakdown and distribution
+    4. False Positives Analysis - Categorized FP analysis
+    5. False Negatives Analysis - Missed events with reasons
+    6. Known Issues & Bugs - Algorithm limitations
+    7. Recommendations - Suggested improvements
+    8. Detailed Player Results - Summary by performance category
+    9. Per-Player Debug Sections - Full TP/FP/FN details for each player
 
     Args:
         results: Dict of player_name -> TestResult
@@ -458,27 +990,91 @@ def generate_report(
     """
     lines = []
 
-    # Header
+    # ==========================================================================
+    # HEADER
+    # ==========================================================================
     lines.append("=" * 80)
-    lines.append("TRIPLE CONE BALL CONTROL DETECTION - DETAILED TEST RESULTS")
+    lines.append("LOSS OF CONTROL (LOC) - TRIPLE CONE DRILL DETECTION REPORT")
+    lines.append("=" * 80)
     lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(f"Frame Tolerance: +/- {frame_tolerance} frames (~{frame_tolerance/30.0:.1f}s at 30fps)")
+    lines.append("Detection System Version: 1.0")
+    lines.append(f"Tolerance: +/- {frame_tolerance} frames (~{frame_tolerance/30.0:.1f}s at 30fps)")
     lines.append("=" * 80)
     lines.append("")
 
-    # Detection Type Legend
-    lines.append("DETECTION TYPES:")
-    lines.append("  OUT_OF_BOUNDS  = Ball exits video frame (boundary violation)")
-    lines.append("  BALL_BEHIND    = Ball stays behind player relative to movement")
+    # ==========================================================================
+    # TABLE OF CONTENTS
+    # ==========================================================================
+    lines.append("TABLE OF CONTENTS")
     lines.append("-" * 80)
+    lines.append("1. Executive Summary")
+    lines.append("2. Detection Configuration")
+    lines.append("3. Performance Metrics")
+    lines.append("4. False Positives Analysis")
+    lines.append("5. False Negatives Analysis")
+    lines.append("6. Known Issues & Bugs")
+    lines.append("7. Recommendations")
+    lines.append("8. Detailed Player Results (by category)")
+    lines.append("9. Per-Player Debug Sections (full details)")
     lines.append("")
 
-    # Per-player results
+    # ==========================================================================
+    # 1. EXECUTIVE SUMMARY
+    # ==========================================================================
+    lines.extend(_generate_executive_summary(summary))
+
+    # ==========================================================================
+    # 2. DETECTION CONFIGURATION
+    # ==========================================================================
+    lines.extend(_generate_detection_config_section())
+
+    # ==========================================================================
+    # 3. PERFORMANCE METRICS
+    # ==========================================================================
+    lines.extend(_generate_performance_metrics(summary))
+
+    # ==========================================================================
+    # 4. FALSE POSITIVES ANALYSIS
+    # ==========================================================================
+    lines.extend(_generate_fp_analysis_section(results, frame_tolerance))
+
+    # ==========================================================================
+    # 5. FALSE NEGATIVES ANALYSIS
+    # ==========================================================================
+    lines.extend(_generate_fn_analysis_section(results))
+
+    # ==========================================================================
+    # 6. KNOWN ISSUES & BUGS
+    # ==========================================================================
+    lines.extend(_generate_known_issues_section())
+
+    # ==========================================================================
+    # 7. RECOMMENDATIONS
+    # ==========================================================================
+    categorized_fps = _categorize_false_positives(results, frame_tolerance)
+    lines.extend(_generate_recommendations_section(summary, categorized_fps))
+
+    # ==========================================================================
+    # 8. DETAILED PLAYER RESULTS (by category)
+    # ==========================================================================
+    lines.extend(_generate_detailed_results_by_category(results))
+
+    # ==========================================================================
+    # 9. PER-PLAYER DEBUG SECTIONS (full TP/FP/FN details)
+    # ==========================================================================
+    lines.append("=" * 80)
+    lines.append("9. PER-PLAYER DEBUG SECTIONS")
+    lines.append("=" * 80)
+    lines.append("")
+    lines.append("Detailed breakdown for each player - use these sections to debug")
+    lines.append("detection results while watching the corresponding video.")
+    lines.append("")
+
     for player_name in sorted(results.keys()):
         result = results[player_name]
-        lines.append(f"{'=' * 60}")
+        lines.append(f"{'─' * 80}")
         lines.append(f"PLAYER: {player_name.upper()}")
-        lines.append(f"{'=' * 60}")
+        lines.append(f"{'─' * 80}")
         lines.append(f"  Ground Truth Events: {result.ground_truth_count}")
         lines.append(f"  Detected Events: {result.detected_count}")
 
@@ -512,7 +1108,7 @@ def generate_report(
                 diff_str = ""
                 if m.frame_difference is not None:
                     sign = "+" if m.frame_difference >= 0 else ""
-                    diff_str = f" Δ: {sign}{m.frame_difference} frames"
+                    diff_str = f"Δ: {sign}{m.frame_difference} frames"
                 lines.append(
                     f"    GT: {gt_str} → Detected: {det_str} [{m.event_type_name}]"
                 )
@@ -570,72 +1166,24 @@ def generate_report(
         )
         lines.append("")
 
-    # Overall summary
+    # ==========================================================================
+    # VISUAL SUMMARY (at the end)
+    # ==========================================================================
     lines.append("=" * 80)
-    lines.append("OVERALL SUMMARY")
+    lines.append("VISUAL SUMMARY")
     lines.append("=" * 80)
     lines.append("")
-
-    # Processing stats
-    lines.append("PROCESSING:")
-    lines.append(f"  Videos in dataset: {summary.total_videos}")
-    lines.append(f"  Videos with Ground Truth: {summary.videos_with_ground_truth}")
-    lines.append(f"  Videos Processed: {summary.videos_processed}")
-    lines.append(f"  Videos Skipped (missing data): {summary.videos_skipped}")
-    lines.append("")
-
-    # Event counts
-    lines.append("EVENT COUNTS:")
-    lines.append(f"  Total Ground Truth Events: {summary.total_ground_truth_events}")
-    lines.append(f"  Total Detected Events: {summary.total_detected_events}")
-    lines.append(f"  Total True Positives: {summary.total_true_positives}")
-    lines.append(f"  Total False Positives: {summary.total_false_positives}")
-    lines.append(f"  Total False Negatives: {summary.total_false_negatives}")
-    lines.append("")
-
-    # Event type breakdown
-    summary.calculate_type_breakdown()
-    if summary.total_by_type:
-        lines.append("DETECTION TYPE BREAKDOWN:")
-        lines.append("-" * 40)
-        for type_name in sorted(summary.total_by_type.keys()):
-            total = summary.total_by_type.get(type_name, 0)
-            tp = summary.tp_by_type.get(type_name, 0)
-            fp = summary.fp_by_type.get(type_name, 0)
-
-            # Calculate precision for this type
-            if tp + fp > 0:
-                type_precision = (tp / (tp + fp)) * 100
-            else:
-                type_precision = 0.0
-
-            lines.append(f"  {type_name}:")
-            lines.append(f"    Total Detected: {total}")
-            lines.append(f"    True Positives: {tp}")
-            lines.append(f"    False Positives: {fp}")
-            lines.append(f"    Type Precision: {type_precision:.1f}%")
-            lines.append("")
-
-    # Overall metrics
-    lines.append("OVERALL METRICS:")
-    lines.append("-" * 40)
-    lines.append(f"  Precision: {summary.overall_precision*100:.1f}%")
-    lines.append(f"  Recall: {summary.overall_recall*100:.1f}%")
-    lines.append(f"  F1 Score: {summary.overall_f1*100:.1f}%")
-    lines.append("")
-
-    # Visual summary bar
-    lines.append("VISUAL SUMMARY:")
-    lines.append("-" * 40)
     total_events = summary.total_true_positives + summary.total_false_positives + summary.total_false_negatives
     if total_events > 0:
-        tp_bar = "█" * int(summary.total_true_positives / total_events * 30)
-        fp_bar = "░" * int(summary.total_false_positives / total_events * 30)
-        fn_bar = "▒" * int(summary.total_false_negatives / total_events * 30)
+        tp_bar = "█" * max(1, int(summary.total_true_positives / total_events * 40))
+        fp_bar = "░" * max(1, int(summary.total_false_positives / total_events * 40))
+        fn_bar = "▒" * max(1, int(summary.total_false_negatives / total_events * 40))
         lines.append(f"  TP: {tp_bar} ({summary.total_true_positives})")
         lines.append(f"  FP: {fp_bar} ({summary.total_false_positives})")
         lines.append(f"  FN: {fn_bar} ({summary.total_false_negatives})")
     lines.append("")
+    lines.append("=" * 80)
+    lines.append("END OF REPORT")
     lines.append("=" * 80)
 
     return "\n".join(lines)

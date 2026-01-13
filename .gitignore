@@ -22,7 +22,12 @@
 
 # Data directories
 video_detection_pose_ball_cones/
+video_detection_pose_ball_cones_720p/
 videos/
+videos_720p/
+loss_videos/
+loss_videos_720p/
+loss_videos_processed_720p/
 
 # =============================================================================
 # Python

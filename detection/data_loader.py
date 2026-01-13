@@ -90,6 +90,55 @@ def get_video_fps(video_path: str, default_fps: float = DEFAULT_FPS) -> float:
 
 
 # =============================================================================
+# SAFE PARQUET READING (handles uint32 dictionary encoding)
+# =============================================================================
+
+def read_parquet_safe(parquet_path: Path) -> pd.DataFrame:
+    """
+    Read parquet file with fallback for uint32 dictionary encoding issue.
+
+    Some parquet files use uint32 dictionary indices which pandas/pyarrow
+    doesn't support directly. This function handles that case by using
+    pyarrow to decode dictionaries first.
+
+    Args:
+        parquet_path: Path to parquet file
+
+    Returns:
+        DataFrame with loaded data
+    """
+    try:
+        # Try normal pandas read first
+        return pd.read_parquet(parquet_path)
+    except Exception as e:
+        if "unsigned dictionary indices" in str(e) or "uint32" in str(e):
+            # Fallback: use pyarrow and decode dictionaries manually
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+            table = pq.read_table(parquet_path)
+
+            # Decode dictionary columns to regular columns
+            new_columns = []
+            for i, field in enumerate(table.schema):
+                col = table.column(i)
+                if pa.types.is_dictionary(field.type):
+                    # For ChunkedArray, decode each chunk and combine
+                    decoded_chunks = [chunk.dictionary_decode() for chunk in col.chunks]
+                    new_col = pa.chunked_array(decoded_chunks)
+                    new_columns.append(new_col)
+                else:
+                    new_columns.append(col)
+
+            # Rebuild table with decoded columns
+            new_table = pa.table(
+                {field.name: new_columns[i] for i, field in enumerate(table.schema)}
+            )
+            return new_table.to_pandas()
+        else:
+            raise
+
+
+# =============================================================================
 # 3-CONE LAYOUT LOADING
 # =============================================================================
 
@@ -119,7 +168,7 @@ def load_triple_cone_layout_from_parquet(cone_parquet_path: str) -> TripleConeLa
 
     logger.info(f"Loading cone positions from parquet: {path.name}")
 
-    cone_df = pd.read_parquet(path)
+    cone_df = read_parquet_safe(path)
 
     if cone_df.empty:
         raise ValueError(f"Cone parquet file is empty: {path}")
@@ -182,7 +231,7 @@ def load_parquet_data(path: str) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Parquet file not found: {path}")
 
-    df = pd.read_parquet(path)
+    df = read_parquet_safe(path)
 
     if df.empty:
         raise ValueError(f"Parquet file is empty: {path}")
@@ -279,6 +328,11 @@ def get_closest_ankle_per_frame(
         # Use PIXEL coordinates for distance (ball and pose have different field transforms)
         ball_px = ball_row['center_x']
         ball_py = ball_row['center_y']
+
+        # Skip frames where ball position is NaN (ball not detected)
+        if pd.isna(ball_px) or pd.isna(ball_py):
+            skipped_frames += 1
+            continue
 
         # Get ankles for this frame
         # Note: pose uses 'frame_idx', ball uses 'frame_id'

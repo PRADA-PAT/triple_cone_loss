@@ -25,7 +25,8 @@ from .config import AppConfig, TripleConeDrillConfig
 from .data_structures import (
     ControlState, EventType, FrameData,
     LossEvent, DetectionResult,
-    TripleConeDrillPhase, DrillDirection, TripleConeLayout
+    TripleConeDrillPhase, DrillDirection, TripleConeLayout,
+    BallTrackingState
 )
 from .data_loader import (
     extract_ankle_positions,
@@ -117,6 +118,15 @@ class BallControlDetector:
         self._intention_sustained_frames = self._detection_config.intention_sustained_frames
         self._use_intention_detection = self._detection_config.use_intention_detection
         self._min_keypoint_confidence = 0.3  # Same as video/annotate_triple_cone.py
+
+        # Unified boundary tracking state machine
+        # Uses interpolated flag to detect when ball actually disappears (off-screen)
+        # rather than inferring from position/velocity
+        self._ball_tracking_state: BallTrackingState = BallTrackingState.NORMAL
+        self._boundary_counter: int = 0
+        self._boundary_event_start_frame: Optional[int] = None
+        self._boundary_sustained_frames: int = 15  # ~0.5s at 30fps
+        self._edge_margin: int = 50  # Matches visualization EDGE_MARGIN
 
         logger.info(f"BallControlDetector initialized (video: {self._video_width}x{self._video_height})")
         if self._use_intention_detection:
@@ -221,8 +231,20 @@ class BallControlDetector:
                 )
 
             # Merge with ball data (include interpolated flag for filtering)
-            ball_cols = ['frame_id', 'center_x', 'center_y',
-                        'field_center_x', 'field_center_y', 'interpolated']
+            # Check if field coordinates exist in ball data
+            has_ball_field_coords = (
+                'field_center_x' in ball_df.columns and
+                'field_center_y' in ball_df.columns
+            )
+
+            if has_ball_field_coords:
+                ball_cols = ['frame_id', 'center_x', 'center_y',
+                            'field_center_x', 'field_center_y', 'interpolated']
+            else:
+                # Fallback: use pixel coordinates when field coords are missing
+                logger.info("Ball field coordinates not found - using pixel coordinates")
+                ball_cols = ['frame_id', 'center_x', 'center_y', 'interpolated']
+
             available_cols = [c for c in ball_cols if c in ball_df.columns]
             merged_df = merged_df.merge(ball_df[available_cols], on='frame_id')
 
@@ -232,6 +254,18 @@ class BallControlDetector:
                 'field_center_x': 'ball_field_x',
                 'field_center_y': 'ball_field_y',
             }, inplace=True)
+
+            # Create ball_field_x/y from pixel coords if field coords missing
+            if not has_ball_field_coords:
+                merged_df['ball_field_x'] = merged_df['ball_x']
+                merged_df['ball_field_y'] = merged_df['ball_y']
+
+            # Check if ankle field coordinates are all NaN (720p data issue)
+            # If so, fall back to pixel coordinates
+            if merged_df['ankle_field_x'].isna().all():
+                logger.info("Ankle field coordinates are all NaN - using pixel coordinates")
+                merged_df['ankle_field_x'] = merged_df['ankle_x']
+                merged_df['ankle_field_y'] = merged_df['ankle_y']
 
             # Calculate ball velocity (field coordinates - for general detection)
             merged_df = merged_df.sort_values('frame_id')
@@ -390,6 +424,11 @@ class BallControlDetector:
                 ball_pixel_pos, hip_pixel_pos, facing_direction
             )
 
+        # Extract ball interpolated flag for boundary tracking
+        # ball_interpolated = True means ball wasn't actually detected (position was filled in)
+        # Note: column is 'interpolated' from ball_df merge, not 'ball_interpolated'
+        ball_interpolated = bool(row.get('interpolated', False))
+
         # ============================================================
         # DETECTION LOGIC - calls detect_loss()
         # ============================================================
@@ -408,7 +447,9 @@ class BallControlDetector:
             in_turning_zone=in_turning_zone,
             # Intention-based parameters
             facing_direction=facing_direction,
-            ball_behind_intention=ball_behind_intention
+            ball_behind_intention=ball_behind_intention,
+            # Boundary tracking parameter
+            ball_interpolated=ball_interpolated
         )
 
         # Determine control state from detection result
@@ -503,6 +544,9 @@ class BallControlDetector:
             player_facing_direction=facing_direction,
             ball_behind_intention=ball_behind_intention,
             ball_intention_position=ball_intention_position,
+            # Ball tracking quality
+            ball_interpolated=ball_interpolated,
+            ball_tracking_state=self._ball_tracking_state,
         )
 
     # ================================================================
@@ -582,6 +626,122 @@ class BallControlDetector:
             return delta_x < -self._behind_threshold
 
         return None
+
+    def _check_edge_zone(self, ball_x: float) -> Tuple[bool, str]:
+        """
+        Check if ball is in edge zone (near screen edge).
+
+        Args:
+            ball_x: Ball X position in pixels
+
+        Returns:
+            (in_edge_zone, edge_side) where edge_side is "LEFT", "RIGHT", or "NONE"
+        """
+        left_distance = ball_x
+        right_distance = self._video_width - ball_x
+
+        if right_distance < self._edge_margin:
+            return True, "RIGHT"
+        if left_distance < self._edge_margin:
+            return True, "LEFT"
+        return False, "NONE"
+
+    def _update_ball_tracking_state(
+        self,
+        ball_visible: bool,
+        in_edge_zone: bool,
+        edge_side: str
+    ) -> Tuple[BallTrackingState, bool]:
+        """
+        Update state machine for unified boundary tracking.
+
+        This state machine tracks whether the ball has exited the video frame
+        by using the interpolated flag (ball_visible = not interpolated).
+
+        State transitions:
+            NORMAL → EDGE_LEFT/RIGHT (ball enters edge zone)
+            EDGE_LEFT/RIGHT → OFF_SCREEN_LEFT/RIGHT (ball disappears)
+            OFF_SCREEN_LEFT/RIGHT → NORMAL (ball returns)
+            NORMAL → DISAPPEARED_MID (ball disappears mid-field)
+
+        Args:
+            ball_visible: True if ball was actually detected (not interpolated)
+            in_edge_zone: True if ball is in edge zone
+            edge_side: "LEFT", "RIGHT", or "NONE"
+
+        Returns:
+            (new_state, should_reset_counter)
+        """
+        current = self._ball_tracking_state
+
+        # Ball not visible (interpolated)
+        if not ball_visible:
+            if current == BallTrackingState.EDGE_LEFT:
+                return BallTrackingState.OFF_SCREEN_LEFT, False
+            elif current == BallTrackingState.EDGE_RIGHT:
+                return BallTrackingState.OFF_SCREEN_RIGHT, False
+            elif current in (BallTrackingState.OFF_SCREEN_LEFT, BallTrackingState.OFF_SCREEN_RIGHT):
+                return current, False  # Stay in off-screen
+            elif current == BallTrackingState.DISAPPEARED_MID:
+                return current, False
+            else:  # NORMAL → mid-field disappearance
+                return BallTrackingState.DISAPPEARED_MID, True
+
+        # Ball is visible
+        if current == BallTrackingState.NORMAL:
+            if in_edge_zone:
+                if edge_side == "LEFT":
+                    return BallTrackingState.EDGE_LEFT, True
+                else:
+                    return BallTrackingState.EDGE_RIGHT, True
+            return BallTrackingState.NORMAL, False
+
+        elif current == BallTrackingState.EDGE_LEFT:
+            if in_edge_zone:
+                if edge_side == "LEFT":
+                    return BallTrackingState.EDGE_LEFT, False
+                else:  # Switched to RIGHT
+                    return BallTrackingState.EDGE_RIGHT, True
+            else:
+                return BallTrackingState.NORMAL, True
+
+        elif current == BallTrackingState.EDGE_RIGHT:
+            if in_edge_zone:
+                if edge_side == "RIGHT":
+                    return BallTrackingState.EDGE_RIGHT, False
+                else:  # Switched to LEFT
+                    return BallTrackingState.EDGE_LEFT, True
+            else:
+                return BallTrackingState.NORMAL, True
+
+        elif current == BallTrackingState.OFF_SCREEN_LEFT:
+            if in_edge_zone:
+                if edge_side == "LEFT":
+                    return BallTrackingState.EDGE_LEFT, False  # Still in danger
+                else:
+                    return BallTrackingState.EDGE_RIGHT, True
+            else:
+                return BallTrackingState.NORMAL, True
+
+        elif current == BallTrackingState.OFF_SCREEN_RIGHT:
+            if in_edge_zone:
+                if edge_side == "RIGHT":
+                    return BallTrackingState.EDGE_RIGHT, False  # Still in danger
+                else:
+                    return BallTrackingState.EDGE_LEFT, True
+            else:
+                return BallTrackingState.NORMAL, True
+
+        elif current == BallTrackingState.DISAPPEARED_MID:
+            if in_edge_zone:
+                if edge_side == "LEFT":
+                    return BallTrackingState.EDGE_LEFT, True
+                else:
+                    return BallTrackingState.EDGE_RIGHT, True
+            else:
+                return BallTrackingState.NORMAL, True
+
+        return current, False
 
     def _extract_nose_position(
         self,
@@ -707,13 +867,15 @@ class BallControlDetector:
         velocity_pixel: Optional[float] = None,
         # Intention-based parameters
         facing_direction: Optional[str] = None,
-        ball_behind_intention: Optional[bool] = None
+        ball_behind_intention: Optional[bool] = None,
+        # Boundary tracking parameter
+        ball_interpolated: bool = False
     ) -> Tuple[bool, Optional[EventType]]:
         """
         Detect if ball control is lost.
 
         Detects three types of loss events:
-        1. BOUNDARY_VIOLATION - Ball exits video frame (out of bounds)
+        1. BOUNDARY_VIOLATION - Ball exits video frame (via unified state machine)
         2. BALL_BEHIND_PLAYER - Ball stays behind player for sustained period (momentum-based)
         3. BALL_BEHIND_INTENTION - Ball stays behind player's facing direction (intention-based)
 
@@ -729,9 +891,10 @@ class BallControlDetector:
             hip_pixel_pos: Player hip position in pixels (for ball-behind detection)
             player_direction: "LEFT", "RIGHT", or None (movement-based)
             in_turning_zone: "CONE1", "CONE2", "CONE3", or None (suppress ball-behind in zones)
-            velocity_pixel: Ball velocity in pixels/frame (for boundary stuck detection)
+            velocity_pixel: Ball velocity in pixels/frame (unused, kept for compatibility)
             facing_direction: "LEFT", "RIGHT", or None (from nose-hip orientation)
             ball_behind_intention: True if ball is behind facing direction
+            ball_interpolated: True if ball position was interpolated (not detected)
 
         Returns:
             Tuple of:
@@ -739,63 +902,56 @@ class BallControlDetector:
             - loss_type: EventType if loss detected, None otherwise
         """
         # ============================================================
-        # 1. BOUNDARY VIOLATION - Ball exits video frame
+        # 1. BOUNDARY VIOLATION - Ball exits video frame (unified state machine)
         # ============================================================
-        # Priority: This is checked first as it's the most severe loss type.
+        # Uses interpolated flag to detect when ball actually disappears,
+        # rather than inferring from position/velocity. This is more accurate
+        # because the ball detection actually disappears when off-screen.
+        #
+        # State machine: NORMAL → EDGE → OFF_SCREEN → NORMAL
+        # Only triggers violation when ball goes OFF_SCREEN (via edge zone first)
 
-        # Thresholds scaled for 720p (1280px width)
-        EDGE_MARGIN = 23
-        SCREEN_RIGHT_THRESHOLD = self._video_width - EDGE_MARGIN
-        SCREEN_LEFT_THRESHOLD = EDGE_MARGIN
-        APPROACHING_RIGHT_THRESHOLD = self._video_width - 45
-        APPROACHING_LEFT_THRESHOLD = 45
-        # Use pixel velocity for stuck detection (scaled for 720p)
-        STUCK_VELOCITY_THRESHOLD_PIXEL = 2.3
         MIN_TIMESTAMP = 3.0
-        FRAMES_TO_CHECK = 5
-
-        # Use pixel velocity if available, otherwise fall back to field velocity
-        # (with a scaled threshold for backward compatibility)
-        effective_velocity = velocity_pixel if velocity_pixel is not None else velocity
-        effective_threshold = STUCK_VELOCITY_THRESHOLD_PIXEL if velocity_pixel is not None else 0.5
 
         # Skip early frames
         if timestamp < MIN_TIMESTAMP:
             return False, None
 
-        ball_x_pixel = ball_pixel_pos[0]
+        # Determine if ball was actually detected (not interpolated)
+        ball_visible = not ball_interpolated
 
-        # Check RIGHT edge
-        if ball_x_pixel > SCREEN_RIGHT_THRESHOLD and effective_velocity < effective_threshold:
-            if len(history) >= FRAMES_TO_CHECK:
-                recent = history[-FRAMES_TO_CHECK:]
-                x_deltas = [recent[i].ball_x - recent[i-1].ball_x for i in range(1, len(recent))]
-                if x_deltas:
-                    avg_x_delta = sum(x_deltas) / len(x_deltas)
-                    if avg_x_delta >= 0:
-                        all_at_edge = all(f.ball_x > APPROACHING_RIGHT_THRESHOLD for f in recent)
-                        if all_at_edge:
-                            logger.debug(
-                                f"Frame {frame_id}: BOUNDARY_VIOLATION at RIGHT edge "
-                                f"(x={ball_x_pixel:.0f}px, velocity={effective_velocity:.1f}px/f)"
-                            )
-                            return True, EventType.BOUNDARY_VIOLATION
+        # Check edge zone status
+        in_edge_zone, edge_side = self._check_edge_zone(ball_pixel_pos[0])
 
-        # Check LEFT edge
-        if ball_x_pixel < SCREEN_LEFT_THRESHOLD and effective_velocity < effective_threshold:
-            if len(history) >= FRAMES_TO_CHECK:
-                recent = history[-FRAMES_TO_CHECK:]
-                x_deltas = [recent[i].ball_x - recent[i-1].ball_x for i in range(1, len(recent))]
-                if x_deltas:
-                    avg_x_delta = sum(x_deltas) / len(x_deltas)
-                    if avg_x_delta <= 0:
-                        all_at_edge = all(f.ball_x < APPROACHING_LEFT_THRESHOLD for f in recent)
-                        if all_at_edge:
-                            logger.debug(
-                                f"Frame {frame_id}: BOUNDARY_VIOLATION at LEFT edge "
-                                f"(x={ball_x_pixel:.0f}px, velocity={effective_velocity:.1f}px/f)"
-                            )
-                            return True, EventType.BOUNDARY_VIOLATION
+        # Update state machine
+        new_state, should_reset = self._update_ball_tracking_state(
+            ball_visible, in_edge_zone, edge_side
+        )
+
+        # Handle counter reset
+        if should_reset:
+            self._boundary_counter = 0
+            self._boundary_event_start_frame = None
+
+        self._ball_tracking_state = new_state
+
+        # Increment counter and check for loss in off-screen states
+        if new_state in (BallTrackingState.OFF_SCREEN_LEFT, BallTrackingState.OFF_SCREEN_RIGHT):
+            self._boundary_counter += 1
+            if self._boundary_event_start_frame is None:
+                self._boundary_event_start_frame = frame_id
+
+            # Trigger boundary violation after sustained off-screen
+            if self._boundary_counter >= self._boundary_sustained_frames:
+                side = "LEFT" if new_state == BallTrackingState.OFF_SCREEN_LEFT else "RIGHT"
+                logger.debug(
+                    f"Frame {frame_id}: BOUNDARY_VIOLATION at {side} edge "
+                    f"(off-screen for {self._boundary_counter} frames, state={new_state.value})"
+                )
+                return True, EventType.BOUNDARY_VIOLATION
+        elif new_state in (BallTrackingState.EDGE_LEFT, BallTrackingState.EDGE_RIGHT):
+            # Increment counter while in edge zone (preparing for potential exit)
+            self._boundary_counter += 1
 
         # ============================================================
         # 2. BALL_BEHIND_PLAYER - Ball stays behind for sustained period
@@ -1010,92 +1166,184 @@ class BallControlDetector:
         """
         Check for boundary violations in frames that have ball data but no ankle data.
 
-        This handles cases where the player goes off-screen chasing the ball,
-        causing pose detection to fail, but the ball is still visible and stuck at edge.
+        Uses unified edge+off-screen tracking state machine (same logic as visualization):
+        - Ball enters edge zone → start counting
+        - Ball disappears (NaN position) while in edge zone → continue counting (OFF_SCREEN)
+        - Counter exceeds threshold → boundary violation
+
+        This handles cases where the player kicks the ball off-screen - the ball
+        crosses the edge zone and then disappears (object detection loses it).
 
         Args:
             ball_df: Ball detection DataFrame with center_x, center_y
             processed_frames: Set of frame IDs already processed in main loop
             fps: Video FPS for timestamp calculation
         """
-        # Thresholds scaled for 720p (1280px width)
-        EDGE_MARGIN = 23
-        SCREEN_RIGHT_THRESHOLD = self._video_width - EDGE_MARGIN
-        SCREEN_LEFT_THRESHOLD = EDGE_MARGIN
-        STUCK_VELOCITY_THRESHOLD = 2.3
-        MIN_CONSECUTIVE_FRAMES = 5
-        MIN_TIMESTAMP = 3.0
+        # Thresholds - must match visualization (annotate_triple_cone.py)
+        EDGE_MARGIN = self._edge_margin  # Usually 50px
+        MIN_SUSTAINED_FRAMES = 15  # ~0.5s at 30fps to confirm boundary violation
+        MIN_TIMESTAMP = 3.0  # Skip first 3 seconds
 
-        # Get ball-only frames (frames with ball data but no ankle data)
-        all_ball_frames = set(ball_df['frame_id'].unique())
-        ball_only_frames = sorted(all_ball_frames - processed_frames)
+        # Get all frames (not just ball-only) for continuous state machine tracking
+        # We need to track state transitions across ALL frames
+        all_frames = sorted(ball_df['frame_id'].unique())
 
-        if not ball_only_frames:
+        if not all_frames:
             return
 
-        logger.debug(f"Checking {len(ball_only_frames)} ball-only frames for boundary violations")
+        logger.debug(f"Checking {len(all_frames)} frames for boundary violations (ball-only check)")
 
-        # Calculate velocity on FULL ball data first (to avoid gaps in diff)
-        ball_df_sorted = ball_df.sort_values('frame_id').copy()
-        ball_df_sorted['velocity_pixel'] = np.sqrt(
-            ball_df_sorted['center_x'].diff()**2 +
-            ball_df_sorted['center_y'].diff()**2
-        ).fillna(0)
-
-        # Now filter to ball-only frames
-        ball_subset = ball_df_sorted[ball_df_sorted['frame_id'].isin(ball_only_frames)]
-
-        # Track consecutive edge frames
-        edge_start = None
-        edge_type = None  # "LEFT" or "RIGHT"
-        consecutive_count = 0
-
-        for _, row in ball_subset.iterrows():
+        # Create lookup for ball positions
+        ball_lookup = {}
+        for _, row in ball_df.iterrows():
             frame_id = int(row['frame_id'])
-            timestamp = frame_id / fps
             ball_x = row['center_x']
-            velocity = row['velocity_pixel']
+            ball_y = row['center_y']
+            interpolated = row.get('interpolated', False)
+            ball_lookup[frame_id] = {
+                'x': ball_x,
+                'y': ball_y,
+                'interpolated': interpolated,
+                'visible': not (pd.isna(ball_x) or interpolated)
+            }
+
+        # State machine tracking (mirrors visualization logic)
+        current_state = BallTrackingState.NORMAL
+        counter = 0
+        event_start_frame = None
+        event_edge_side = None
+        went_off_screen = False  # Track if ball actually went off-screen during this sequence
+
+        for frame_id in all_frames:
+            timestamp = frame_id / fps
 
             # Skip early frames
             if timestamp < MIN_TIMESTAMP:
                 continue
 
-            # Check if ball is at edge and stuck
-            at_right_edge = ball_x > SCREEN_RIGHT_THRESHOLD and velocity < STUCK_VELOCITY_THRESHOLD
-            at_left_edge = ball_x < SCREEN_LEFT_THRESHOLD and velocity < STUCK_VELOCITY_THRESHOLD
+            # NOTE: We process ALL frames here, not just ball-only frames
+            # This is because boundary violations can start in frames with ankle data
+            # (ball enters edge zone) and continue into frames without ankle data
+            # (ball goes off-screen, player may also leave frame)
+            # The main loop doesn't reliably detect these because it requires
+            # ankle data for each frame, causing gaps in tracking.
 
-            current_edge = "RIGHT" if at_right_edge else ("LEFT" if at_left_edge else None)
+            ball_info = ball_lookup.get(frame_id, {'x': np.nan, 'visible': False})
+            ball_x = ball_info['x']
+            ball_visible = ball_info['visible']
 
-            if current_edge:
-                if edge_start is None:
-                    edge_start = frame_id
-                    edge_type = current_edge
-                    consecutive_count = 1
-                elif current_edge == edge_type:
-                    consecutive_count += 1
+            # Determine edge zone status
+            in_edge_zone = False
+            edge_side = "NONE"
+            if not pd.isna(ball_x):
+                if ball_x < EDGE_MARGIN:
+                    in_edge_zone = True
+                    edge_side = "LEFT"
+                elif ball_x > (self._video_width - EDGE_MARGIN):
+                    in_edge_zone = True
+                    edge_side = "RIGHT"
+
+            # Update state machine (same logic as _update_ball_tracking_state)
+            prev_state = current_state
+            should_reset = False
+
+            if not ball_visible:
+                # Ball not visible - check if we were in edge zone
+                if current_state == BallTrackingState.EDGE_LEFT:
+                    current_state = BallTrackingState.OFF_SCREEN_LEFT
+                    went_off_screen = True  # Ball actually went off-screen via left edge
+                elif current_state == BallTrackingState.EDGE_RIGHT:
+                    current_state = BallTrackingState.OFF_SCREEN_RIGHT
+                    went_off_screen = True  # Ball actually went off-screen via right edge
+                elif current_state in (BallTrackingState.OFF_SCREEN_LEFT, BallTrackingState.OFF_SCREEN_RIGHT):
+                    pass  # Stay in off-screen state (already went_off_screen)
+                elif current_state == BallTrackingState.DISAPPEARED_MID:
+                    pass  # Stay in disappeared mid
                 else:
-                    # Edge type changed, check if previous sequence was long enough
-                    if consecutive_count >= MIN_CONSECUTIVE_FRAMES:
-                        self._create_ball_only_boundary_event(
-                            edge_start, frame_id - 1, edge_type, fps
-                        )
-                    edge_start = frame_id
-                    edge_type = current_edge
-                    consecutive_count = 1
+                    # NORMAL → disappeared mid-field
+                    current_state = BallTrackingState.DISAPPEARED_MID
+                    should_reset = True
             else:
-                # Ball moved away from edge
-                if edge_start is not None and consecutive_count >= MIN_CONSECUTIVE_FRAMES:
-                    self._create_ball_only_boundary_event(
-                        edge_start, frame_id - 1, edge_type, fps
-                    )
-                edge_start = None
-                edge_type = None
-                consecutive_count = 0
+                # Ball is visible
+                if current_state == BallTrackingState.NORMAL:
+                    if in_edge_zone:
+                        if edge_side == "LEFT":
+                            current_state = BallTrackingState.EDGE_LEFT
+                        else:
+                            current_state = BallTrackingState.EDGE_RIGHT
+                        should_reset = True
+                elif current_state == BallTrackingState.EDGE_LEFT:
+                    if not in_edge_zone:
+                        current_state = BallTrackingState.NORMAL
+                        should_reset = True
+                    elif edge_side == "RIGHT":
+                        current_state = BallTrackingState.EDGE_RIGHT
+                        should_reset = True
+                elif current_state == BallTrackingState.EDGE_RIGHT:
+                    if not in_edge_zone:
+                        current_state = BallTrackingState.NORMAL
+                        should_reset = True
+                    elif edge_side == "LEFT":
+                        current_state = BallTrackingState.EDGE_LEFT
+                        should_reset = True
+                elif current_state == BallTrackingState.OFF_SCREEN_LEFT:
+                    if in_edge_zone and edge_side == "LEFT":
+                        current_state = BallTrackingState.EDGE_LEFT
+                    elif in_edge_zone and edge_side == "RIGHT":
+                        current_state = BallTrackingState.EDGE_RIGHT
+                        should_reset = True
+                    else:
+                        current_state = BallTrackingState.NORMAL
+                        should_reset = True
+                elif current_state == BallTrackingState.OFF_SCREEN_RIGHT:
+                    if in_edge_zone and edge_side == "RIGHT":
+                        current_state = BallTrackingState.EDGE_RIGHT
+                    elif in_edge_zone and edge_side == "LEFT":
+                        current_state = BallTrackingState.EDGE_LEFT
+                        should_reset = True
+                    else:
+                        current_state = BallTrackingState.NORMAL
+                        should_reset = True
+                elif current_state == BallTrackingState.DISAPPEARED_MID:
+                    if in_edge_zone:
+                        if edge_side == "LEFT":
+                            current_state = BallTrackingState.EDGE_LEFT
+                        else:
+                            current_state = BallTrackingState.EDGE_RIGHT
+                        should_reset = True
+                    else:
+                        current_state = BallTrackingState.NORMAL
+                        should_reset = True
 
-        # Handle sequence that extends to end of ball-only frames
-        if edge_start is not None and consecutive_count >= MIN_CONSECUTIVE_FRAMES:
+            # Handle counter and event creation
+            if should_reset:
+                # Check if we're transitioning OUT of a tracked state
+                if prev_state in (BallTrackingState.EDGE_LEFT, BallTrackingState.EDGE_RIGHT,
+                                  BallTrackingState.OFF_SCREEN_LEFT, BallTrackingState.OFF_SCREEN_RIGHT):
+                    # Only create event if ball actually went OFF_SCREEN (not just edge zone entry)
+                    # This prevents false positives from brief edge zone touches
+                    if counter >= MIN_SUSTAINED_FRAMES and event_start_frame is not None and went_off_screen:
+                        self._create_ball_only_boundary_event(
+                            event_start_frame, frame_id - 1, event_edge_side, fps
+                        )
+                counter = 0
+                event_start_frame = None
+                event_edge_side = None
+                went_off_screen = False  # Reset for next sequence
+
+            # Increment counter for tracked states
+            if current_state in (BallTrackingState.EDGE_LEFT, BallTrackingState.EDGE_RIGHT,
+                                BallTrackingState.OFF_SCREEN_LEFT, BallTrackingState.OFF_SCREEN_RIGHT):
+                if event_start_frame is None:
+                    event_start_frame = frame_id
+                    event_edge_side = "LEFT" if current_state in (BallTrackingState.EDGE_LEFT, BallTrackingState.OFF_SCREEN_LEFT) else "RIGHT"
+                counter += 1
+
+        # Handle sequence that extends to end of frames
+        # Only create event if ball actually went OFF_SCREEN
+        if counter >= MIN_SUSTAINED_FRAMES and event_start_frame is not None and went_off_screen:
             self._create_ball_only_boundary_event(
-                edge_start, int(ball_subset['frame_id'].iloc[-1]), edge_type, fps
+                event_start_frame, all_frames[-1], event_edge_side, fps
             )
 
     def _create_ball_only_boundary_event(
@@ -1105,12 +1353,14 @@ class BallControlDetector:
         edge_type: str,
         fps: float
     ):
-        """Create a boundary violation event for ball-only frames."""
+        """Create a boundary violation event detected via edge+off-screen tracking."""
         self._event_counter += 1
 
-        # Placeholder positions for ball-only events (player is off-screen)
+        # Placeholder positions for ball-only events (player may be off-screen)
         edge_x = self._video_width if edge_type == "RIGHT" else 0.0
         placeholder_pos = (edge_x, self._video_height / 2)
+
+        duration_frames = end_frame - start_frame + 1
 
         event = LossEvent(
             event_id=self._event_counter,
@@ -1120,19 +1370,19 @@ class BallControlDetector:
             start_timestamp=start_frame / fps,
             end_timestamp=end_frame / fps,
             ball_position=placeholder_pos,
-            player_position=placeholder_pos,  # Unknown - player off-screen
+            player_position=placeholder_pos,  # Unknown - player may be off-screen
             distance_at_loss=0.0,  # Unknown - no ankle data
-            velocity_at_loss=0.0,  # Ball is stuck at edge
+            velocity_at_loss=0.0,
             nearest_cone_id=-1,  # Not relevant for boundary violations
             gate_context=None,
             severity="high",  # Boundary violations are always high severity
-            notes=f"Ball stuck at {edge_type} edge (player off-screen)"
+            notes=f"Ball exited via {edge_type} edge ({duration_frames}f)"
         )
 
         self._events.append(event)
         logger.info(
-            f"Ball-only boundary violation: frames {start_frame}-{end_frame} "
-            f"({event.start_timestamp:.2f}s-{event.end_timestamp:.2f}s) at {edge_type} edge"
+            f"Boundary violation: frames {start_frame}-{end_frame} "
+            f"({event.start_timestamp:.2f}s-{event.end_timestamp:.2f}s) via {edge_type} edge"
         )
 
     def _finalize_events(self):

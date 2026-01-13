@@ -19,7 +19,7 @@ from .ball_control_detector import BallControlDetector, detect_ball_control
 from .triple_cone_detector import TripleConeDetector, TripleConeConeDetector, TurnEvent, DrillState
 from .data_structures import (
     # Core enums and states
-    ControlState, EventType, DrillDirection,
+    ControlState, EventType, DrillDirection, BallTrackingState,
     # Triple Cone structures (3-cone)
     TripleConeDrillPhase, TripleConeLayout,
     # Common structures
@@ -57,7 +57,7 @@ __all__ = [
     'BallControlDetector', 'detect_ball_control',
     'TripleConeDetector', 'TripleConeConeDetector', 'TurnEvent', 'DrillState',
     # Data structures - Core
-    'ControlState', 'EventType', 'DrillDirection',
+    'ControlState', 'EventType', 'DrillDirection', 'BallTrackingState',
     'FrameData', 'LossEvent', 'DetectionResult',
     # Data structures - Triple Cone (3-cone)
     'TripleConeDrillPhase', 'TripleConeLayout',
