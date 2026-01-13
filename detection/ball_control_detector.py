@@ -954,9 +954,67 @@ class BallControlDetector:
             self._boundary_counter += 1
 
         # ============================================================
-        # 2. BALL_BEHIND_PLAYER - Ball stays behind for sustained period
+        # 2. BALL_BEHIND_INTENTION - Ball behind player's facing direction (PRIMARY)
+        # ============================================================
+        # Uses nose-hip orientation (intention) instead of movement direction.
+        # This is MORE ACCURATE than momentum-based detection because it captures
+        # where the player is LOOKING, not just where they're moving.
+        # Checked FIRST before momentum-based detection.
+
+        if self._use_intention_detection:
+            # NOTE: Unlike BALL_BEHIND_PLAYER, we do NOT skip turning zones for intention detection.
+            # Intention (facing direction) should be tracked even during turns.
+
+            # Only proceed if we have facing direction information
+            if facing_direction is not None and ball_behind_intention is not None:
+                # Check if ball is currently behind facing direction
+                if not ball_behind_intention:
+                    # Ball is not behind intention - check if we should continue LOST state
+                    if len(history) >= 5:
+                        recent_lost = sum(1 for f in history[-5:] if f.control_state == ControlState.LOST)
+                        if recent_lost >= 3:
+                            # Check if this was an intention-based loss
+                            ball_hip_dist = abs(ball_pixel_pos[0] - hip_pixel_pos[0]) if hip_pixel_pos else 0
+                            RECOVERY_DISTANCE_THRESHOLD = 80.0
+                            if ball_hip_dist > RECOVERY_DISTANCE_THRESHOLD:
+                                logger.debug(
+                                    f"Frame {frame_id}: Continuing BALL_BEHIND_INTENTION loss "
+                                    f"(ball-hip dist={ball_hip_dist:.0f}px, awaiting recovery)"
+                                )
+                                return True, EventType.BALL_BEHIND_INTENTION
+                else:
+                    # Ball IS behind intention - check for sustained pattern
+                    if len(history) >= self._intention_sustained_frames:
+                        recent = history[-self._intention_sustained_frames:]
+
+                        # Count consecutive frames where ball was behind intention
+                        behind_count = 0
+                        for frame in recent:
+                            if frame.ball_behind_intention is True:
+                                behind_count += 1
+                            else:
+                                behind_count = 0
+
+                        # Only trigger if ball was behind for entire sustained period
+                        if behind_count >= self._intention_sustained_frames - 1:
+                            # Verify player facing direction was consistent
+                            facings = [f.player_facing_direction for f in recent if f.player_facing_direction]
+                            if len(facings) >= self._intention_sustained_frames // 2:
+                                dominant_facing = max(set(facings), key=facings.count)
+                                same_facing_ratio = facings.count(dominant_facing) / len(facings)
+
+                                if same_facing_ratio >= 0.7:  # 70% consistency threshold
+                                    logger.debug(
+                                        f"Frame {frame_id}: BALL_BEHIND_INTENTION detected "
+                                        f"(behind for {behind_count} frames, facing={dominant_facing})"
+                                    )
+                                    return True, EventType.BALL_BEHIND_INTENTION
+
+        # ============================================================
+        # 3. BALL_BEHIND_PLAYER - Ball stays behind for sustained period (FALLBACK)
         # ============================================================
         # Only trigger if:
+        # - Intention-based detection didn't trigger (above)
         # - Player has clear movement direction
         # - Ball is behind player (opposite to movement direction)
         # - NOT in a turning zone (where "behind" is expected briefly)
@@ -1022,67 +1080,6 @@ class BallControlDetector:
                             f"(behind for {behind_count} frames, direction={dominant_direction})"
                         )
                         return True, EventType.BALL_BEHIND_PLAYER
-
-        # ============================================================
-        # 3. BALL_BEHIND_INTENTION - Ball behind player's facing direction
-        # ============================================================
-        # Uses nose-hip orientation (intention) instead of movement direction.
-        # This captures cases where player is looking one way but ball is behind
-        # their facing direction.
-
-        if not self._use_intention_detection:
-            return False, None
-
-        # NOTE: Unlike BALL_BEHIND_PLAYER, we do NOT skip turning zones for intention detection.
-        # Intention (facing direction) should be tracked even during turns.
-
-        # Skip if no facing direction information
-        if facing_direction is None or ball_behind_intention is None:
-            return False, None
-
-        # Check if ball is currently behind facing direction
-        if not ball_behind_intention:
-            # Ball is not behind intention - check if we should continue LOST state
-            if len(history) >= 5:
-                recent_lost = sum(1 for f in history[-5:] if f.control_state == ControlState.LOST)
-                if recent_lost >= 3:
-                    # Check if this was an intention-based loss
-                    ball_hip_dist = abs(ball_pixel_pos[0] - hip_pixel_pos[0]) if hip_pixel_pos else 0
-                    RECOVERY_DISTANCE_THRESHOLD = 80.0
-                    if ball_hip_dist > RECOVERY_DISTANCE_THRESHOLD:
-                        logger.debug(
-                            f"Frame {frame_id}: Continuing BALL_BEHIND_INTENTION loss "
-                            f"(ball-hip dist={ball_hip_dist:.0f}px, awaiting recovery)"
-                        )
-                        return True, EventType.BALL_BEHIND_INTENTION
-            return False, None
-
-        # Check for sustained "behind intention" pattern in history
-        if len(history) >= self._intention_sustained_frames:
-            recent = history[-self._intention_sustained_frames:]
-
-            # Count consecutive frames where ball was behind intention
-            behind_count = 0
-            for frame in recent:
-                if frame.ball_behind_intention is True:
-                    behind_count += 1
-                else:
-                    behind_count = 0
-
-            # Only trigger if ball was behind for entire sustained period
-            if behind_count >= self._intention_sustained_frames - 1:
-                # Verify player facing direction was consistent
-                facings = [f.player_facing_direction for f in recent if f.player_facing_direction]
-                if len(facings) >= self._intention_sustained_frames // 2:
-                    dominant_facing = max(set(facings), key=facings.count)
-                    same_facing_ratio = facings.count(dominant_facing) / len(facings)
-
-                    if same_facing_ratio >= 0.7:  # 70% consistency threshold
-                        logger.debug(
-                            f"Frame {frame_id}: BALL_BEHIND_INTENTION detected "
-                            f"(behind for {behind_count} frames, facing={dominant_facing})"
-                        )
-                        return True, EventType.BALL_BEHIND_INTENTION
 
         return False, None
 
