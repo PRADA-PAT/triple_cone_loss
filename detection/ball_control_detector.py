@@ -969,19 +969,10 @@ class BallControlDetector:
             if facing_direction is not None and ball_behind_intention is not None:
                 # Check if ball is currently behind facing direction
                 if not ball_behind_intention:
-                    # Ball is not behind intention - check if we should continue LOST state
-                    if len(history) >= 5:
-                        recent_lost = sum(1 for f in history[-5:] if f.control_state == ControlState.LOST)
-                        if recent_lost >= 3:
-                            # Check if this was an intention-based loss
-                            ball_hip_dist = abs(ball_pixel_pos[0] - hip_pixel_pos[0]) if hip_pixel_pos else 0
-                            RECOVERY_DISTANCE_THRESHOLD = 80.0
-                            if ball_hip_dist > RECOVERY_DISTANCE_THRESHOLD:
-                                logger.debug(
-                                    f"Frame {frame_id}: Continuing BALL_BEHIND_INTENTION loss "
-                                    f"(ball-hip dist={ball_hip_dist:.0f}px, awaiting recovery)"
-                                )
-                                return True, EventType.BALL_BEHIND_INTENTION
+                    # Ball is in front of facing direction - not a loss condition
+                    # Do not continue LOST state even if ball is far from hip
+                    # (being far but IN FRONT means player is chasing successfully)
+                    pass
                 else:
                     # Ball IS behind intention - check for sustained pattern
                     if len(history) >= self._intention_sustained_frames:
@@ -1031,24 +1022,10 @@ class BallControlDetector:
         # Check if ball is currently behind player
         is_behind = self._is_ball_behind(ball_pixel_pos, hip_pixel_pos, player_direction)
 
-        # If ball is NOT behind, check if we should continue LOST state
-        # (require ball to be close enough before recovering)
+        # If ball is NOT behind, it's not a loss condition
+        # Do not continue LOST state even if ball is far from hip
+        # (being far but IN FRONT means player is chasing successfully)
         if not is_behind:
-            # Check if we're currently in a LOST state (from recent history)
-            if len(history) >= 5:
-                recent_lost = sum(1 for f in history[-5:] if f.control_state == ControlState.LOST)
-                if recent_lost >= 3:  # Majority of recent frames were LOST
-                    # Calculate ball-hip distance to check recovery
-                    ball_hip_dist = abs(ball_pixel_pos[0] - hip_pixel_pos[0])
-                    # Require ball to be close enough to hip to recover
-                    RECOVERY_DISTANCE_THRESHOLD = 36.0  # pixels (720p)
-                    if ball_hip_dist > RECOVERY_DISTANCE_THRESHOLD:
-                        # Ball still too far - continue LOST state
-                        logger.debug(
-                            f"Frame {frame_id}: Continuing BALL_BEHIND loss "
-                            f"(ball-hip dist={ball_hip_dist:.0f}px, awaiting recovery)"
-                        )
-                        return True, EventType.BALL_BEHIND_PLAYER
             return False, None
 
         # Check for sustained "behind" pattern in history

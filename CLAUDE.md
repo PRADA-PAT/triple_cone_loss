@@ -80,7 +80,62 @@ PYTHONPATH="." pytest tests/test_detector.py -v
 
 # Run tests with coverage
 PYTHONPATH="." pytest tests/ --cov=detection
+
+# Run validation with custom frame tolerance (default: 45 frames = 1.5s)
+python run_detection.py --test --frame-tolerance 90  # 90 frames = 3.0s tolerance
 ```
+
+## Testing & Validation
+
+### Ground Truth Validation
+
+The `--test` flag runs detection against `ground_truth.csv` and calculates precision/recall/F1.
+
+```bash
+python run_detection.py --test                      # Default 45 frame tolerance
+python run_detection.py --test --frame-tolerance 90 # 3.0s tolerance (recommended)
+```
+
+### Frame Tolerance
+
+Frame tolerance defines how close a detected event must be to ground truth to count as a True Positive.
+
+| Tolerance | Frames | Seconds | Use Case |
+|-----------|--------|---------|----------|
+| Strict | 45 | 1.5s | Default, may miss valid detections |
+| **Recommended** | **90** | **3.0s** | Accounts for annotation imprecision |
+| Lenient | 120 | 4.0s | For exploratory analysis |
+
+### Current Performance (as of 2026-01-13)
+
+| Metric | 45 frames (1.5s) | 90 frames (3.0s) |
+|--------|------------------|------------------|
+| F1 Score | 20.4% | **32.7%** |
+| Precision | 17.2% | 27.6% |
+| Recall | 25.0% | 40.0% |
+| True Positives | 5 | 8 |
+| False Positives | 24 | 21 |
+| False Negatives | 15 | 12 |
+
+### Detection Gaps (Not Yet Detected)
+
+These ground truth event types are **not currently detected** by the system:
+
+| Pattern | Count | Examples | Notes |
+|---------|-------|----------|-------|
+| Overshoot/miss turn | 9 | Ball pushed too far, player misses cone | Needs new detector |
+| Ball behind during turn | 2 | Ball gets behind player mid-turn | Turning zone suppression may hide these |
+| Ball launched OOB | 2 | Player kicks ball out of frame | Some detected, timing mismatch |
+| Cone crash | 1 | Player collides with cone | Needs cone proximity detector |
+| Large radius turn | 1 | Takes wide path around cone | Needs path analysis |
+
+### Test Output Files
+
+After running `--test`, results are saved to `test_results/`:
+- `test_summary.csv` - Per-player TP/FP/FN counts
+- `test_events.csv` - All detected events with match status
+- `LATEST_report.txt` - Detailed human-readable report
+- `test_report_F1-XX.X_YYYYMMDD_HH-MM-SS.txt` - Timestamped reports
 
 ## Architecture
 
@@ -366,6 +421,298 @@ video_detection_pose_ball_cones/
 ```
 
 Some players use `{player_name}` without `_tc` suffix - `run_detection.py` handles both conventions.
+
+## Detection Logic Deep Dive (For Porting to Other Applications)
+
+This section provides detailed documentation of the loss-of-control detection algorithms, designed to be self-contained enough for porting to other applications.
+
+### Overview of Detection Types
+
+The system detects three types of loss events:
+
+| Event Type | Enum Value | Description |
+|------------|------------|-------------|
+| `BOUNDARY_VIOLATION` | `boundary` | Ball exits video frame |
+| `BALL_BEHIND_INTENTION` | `ball_behind_intention` | Ball behind player's facing direction (PRIMARY) |
+| `BALL_BEHIND_PLAYER` | `ball_behind` | Ball behind player's movement direction (FALLBACK) |
+
+---
+
+### 1. Ball Behind Detection (Two Subtypes)
+
+The system uses two methods to detect when the ball gets "behind" the player. **Intention-based** is checked first (PRIMARY), then **momentum-based** (FALLBACK).
+
+#### 1.1 Intention-Based Detection (`BALL_BEHIND_INTENTION`) - PRIMARY
+
+**Concept**: Detects loss when ball is behind where the player is **LOOKING** (body orientation), not where they're moving.
+
+**Why it's better**: Captures turn intention since head/torso turns before body moves. Detects loss earlier and more accurately during direction changes.
+
+**Algorithm**:
+
+```
+INPUTS:
+  - ball_pixel_pos: (x, y) position of ball in pixels
+  - hip_pixel_pos: (x, y) position of player's hip center
+  - nose_pixel_pos: (x, y) position of player's nose
+
+STEP 1: Determine Facing Direction (from nose-hip vector)
+  diff = nose_x - hip_x
+  if diff > NOSE_HIP_FACING_THRESHOLD (5.0px):
+      facing_direction = "RIGHT"  # Head is to right of body = facing right
+  elif diff < -NOSE_HIP_FACING_THRESHOLD:
+      facing_direction = "LEFT"   # Head is to left of body = facing left
+  else:
+      facing_direction = None     # Neutral/ambiguous
+
+STEP 2: Determine Ball Position Relative to Facing
+  delta_x = ball_x - hip_x
+
+  if abs(delta_x) < BEHIND_THRESHOLD (9.0px):
+      position = "I-ALIGNED"   # Ball directly at player
+      is_behind = False
+  elif facing_direction == "LEFT":
+      if delta_x < 0:
+          position = "I-FRONT"  # Ball to left, facing left = FRONT
+          is_behind = False
+      else:
+          position = "I-BEHIND" # Ball to right, facing left = BEHIND
+          is_behind = True
+  elif facing_direction == "RIGHT":
+      if delta_x > 0:
+          position = "I-FRONT"  # Ball to right, facing right = FRONT
+          is_behind = False
+      else:
+          position = "I-BEHIND" # Ball to left, facing right = BEHIND
+          is_behind = True
+
+STEP 3: Check for Sustained Pattern (temporal filtering)
+  - Look at last N frames (INTENTION_SUSTAINED_FRAMES = 12, ~0.4s at 30fps)
+  - Count consecutive frames where ball_behind_intention == True
+  - Also verify facing direction was consistent (70% threshold)
+  - If sustained → trigger BALL_BEHIND_INTENTION event
+```
+
+**Key Constants (720p)**:
+```python
+NOSE_HIP_FACING_THRESHOLD = 5.0   # Min nose-hip offset to determine facing
+BEHIND_THRESHOLD = 9.0            # Min ball-hip offset to be "behind"
+INTENTION_SUSTAINED_FRAMES = 12   # ~0.4s at 30fps to confirm
+MIN_KEYPOINT_CONFIDENCE = 0.3     # Pose keypoint confidence threshold
+```
+
+**Pose Keypoints Required**:
+- `nose`: (x, y, confidence) - for facing direction
+- `hip`: (x, y, confidence) - body center reference
+- Fallback: `left_hip` + `right_hip` averaged if `hip` not available
+
+---
+
+#### 1.2 Momentum-Based Detection (`BALL_BEHIND_PLAYER`) - FALLBACK
+
+**Concept**: Detects loss when ball is behind where the player is **MOVING** (velocity direction).
+
+**When used**: Only checked if intention-based detection didn't trigger (nose data unavailable or inconsistent).
+
+**Algorithm**:
+
+```
+INPUTS:
+  - ball_pixel_pos: (x, y) position of ball
+  - hip_pixel_pos: (x, y) position of hip
+  - hip_history: deque of last 15 hip positions (~0.5s at 30fps)
+  - in_turning_zone: "CONE1"/"CONE2"/"CONE3" or None
+
+STEP 1: Calculate Movement Direction from Hip History
+  if len(hip_history) >= 2:
+      prev_hip = hip_history[0]  # Oldest
+      curr_hip = hip_history[-1] # Current
+      dx = curr_hip.x - prev_hip.x
+
+      if dx > MOVEMENT_THRESHOLD (1.4px):
+          player_direction = "RIGHT"  # Moving rightward
+      elif dx < -MOVEMENT_THRESHOLD:
+          player_direction = "LEFT"   # Moving leftward
+      else:
+          player_direction = None     # Stationary (use last known direction)
+
+STEP 2: Check if Ball is Behind Movement Direction
+  delta_x = ball_x - hip_x
+
+  if player_direction == "LEFT":
+      # Moving left: ball to RIGHT of hip = BEHIND
+      is_behind = delta_x > BEHIND_THRESHOLD (9.0px)
+  elif player_direction == "RIGHT":
+      # Moving right: ball to LEFT of hip = BEHIND
+      is_behind = delta_x < -BEHIND_THRESHOLD
+
+STEP 3: Skip if in Turning Zone
+  # Ball being "behind" is expected during turns
+  if in_turning_zone is not None:
+      return False, None  # No loss detected
+
+STEP 4: Check for Sustained Pattern
+  - Look at last N frames (BEHIND_SUSTAINED_FRAMES = 10, ~0.33s at 30fps)
+  - Count consecutive frames where ball_behind_player == True
+  - Also verify movement direction was consistent (70% threshold)
+  - If sustained → trigger BALL_BEHIND_PLAYER event
+```
+
+**Key Constants (720p)**:
+```python
+BEHIND_THRESHOLD = 9.0           # Min ball-hip offset (pixels)
+MOVEMENT_THRESHOLD = 1.4         # Min hip movement to determine direction (pixels)
+BEHIND_SUSTAINED_FRAMES = 10     # ~0.33s at 30fps to confirm
+HIP_HISTORY_SIZE = 15            # ~0.5s history for direction calculation
+```
+
+**Important**: Momentum-based detection is **suppressed in turning zones** because the ball naturally falls "behind" during turns.
+
+---
+
+### 2. Boundary/Edge Detection (`BOUNDARY_VIOLATION`)
+
+**Concept**: Detects when the ball exits the video frame by tracking ball visibility near screen edges.
+
+**Key Insight**: Uses the `interpolated` flag from ball detection. When `interpolated=True`, the ball wasn't actually detected (position was filled in by the tracker). This signals the ball went off-screen.
+
+#### State Machine (`BallTrackingState`)
+
+```
+States:
+  NORMAL           - Ball visible, not near edge
+  EDGE_LEFT        - Ball in left edge zone (warning)
+  EDGE_RIGHT       - Ball in right edge zone (warning)
+  OFF_SCREEN_LEFT  - Ball disappeared via left edge (loss!)
+  OFF_SCREEN_RIGHT - Ball disappeared via right edge (loss!)
+  DISAPPEARED_MID  - Ball disappeared mid-field (detection failure, ignore)
+
+Transitions:
+  NORMAL → EDGE_LEFT/RIGHT    (ball enters edge zone)
+  EDGE_LEFT → OFF_SCREEN_LEFT (ball disappears while in left edge)
+  EDGE_RIGHT → OFF_SCREEN_RIGHT (ball disappears while in right edge)
+  OFF_SCREEN_* → NORMAL       (ball reappears)
+  NORMAL → DISAPPEARED_MID    (ball disappears mid-field - not a loss)
+```
+
+**Algorithm**:
+
+```
+INPUTS:
+  - ball_pixel_pos: (x, y) current ball position
+  - ball_interpolated: True if ball wasn't actually detected this frame
+  - video_width: Width of video in pixels
+
+CONSTANTS:
+  EDGE_MARGIN = 50            # Pixels from edge to define "edge zone"
+  BOUNDARY_SUSTAINED_FRAMES = 15  # ~0.5s at 30fps to confirm
+
+STEP 1: Determine Ball Visibility
+  ball_visible = NOT ball_interpolated
+
+STEP 2: Check Edge Zone Status
+  left_distance = ball_x
+  right_distance = video_width - ball_x
+
+  if right_distance < EDGE_MARGIN:
+      in_edge_zone = True, edge_side = "RIGHT"
+  elif left_distance < EDGE_MARGIN:
+      in_edge_zone = True, edge_side = "LEFT"
+  else:
+      in_edge_zone = False, edge_side = "NONE"
+
+STEP 3: Update State Machine
+  prev_state = current_state
+
+  if NOT ball_visible:
+      # Ball disappeared - check if was in edge zone
+      if prev_state == EDGE_LEFT:
+          current_state = OFF_SCREEN_LEFT
+      elif prev_state == EDGE_RIGHT:
+          current_state = OFF_SCREEN_RIGHT
+      elif prev_state in (OFF_SCREEN_LEFT, OFF_SCREEN_RIGHT):
+          # Stay in off-screen state
+          pass
+      else:
+          # Disappeared mid-field - detection failure, not a loss
+          current_state = DISAPPEARED_MID
+          reset_counter()
+  else:
+      # Ball is visible
+      if in_edge_zone:
+          current_state = EDGE_LEFT or EDGE_RIGHT (based on edge_side)
+      else:
+          current_state = NORMAL
+          reset_counter()
+
+STEP 4: Increment Counter and Check Threshold
+  if current_state in (OFF_SCREEN_LEFT, OFF_SCREEN_RIGHT):
+      boundary_counter += 1
+      if boundary_counter >= BOUNDARY_SUSTAINED_FRAMES:
+          trigger BOUNDARY_VIOLATION event
+  elif current_state in (EDGE_LEFT, EDGE_RIGHT):
+      boundary_counter += 1  # Preparing for potential exit
+```
+
+**Key Constants**:
+```python
+EDGE_MARGIN = 50                 # Pixels from screen edge
+BOUNDARY_SUSTAINED_FRAMES = 15   # ~0.5s at 30fps
+MIN_TIMESTAMP = 3.0              # Skip first 3 seconds (setup)
+```
+
+**Critical Requirement**: The ball tracker must provide an `interpolated` flag (or equivalent) indicating whether the ball was actually detected or its position was estimated/filled-in.
+
+---
+
+### 3. Turning Zone Suppression
+
+The system uses elliptical "turning zones" around each cone to suppress false positives during turns.
+
+**Why needed**: During a turn, the ball naturally gets "behind" the player briefly. Without suppression, every turn would trigger `BALL_BEHIND_PLAYER`.
+
+**Implementation**:
+```
+# Elliptical zone check
+def is_point_in_turning_zone(point_x, point_y, zone):
+    dx = point_x - zone.center_x
+    dy = point_y - zone.center_y
+    # Ellipse equation: (dx/rx)² + (dy/ry)² <= 1
+    return (dx/zone.radius_x)² + (dy/zone.radius_y)² <= 1.0
+```
+
+**Note**: Intention-based detection does NOT use turning zone suppression because facing direction should be tracked even during turns.
+
+---
+
+### 4. Porting Checklist
+
+To port this detection logic to another application:
+
+**Required Inputs**:
+1. Ball position per frame (x, y in pixels)
+2. Ball visibility flag (`interpolated` or equivalent)
+3. Player hip position per frame (or left_hip + right_hip)
+4. Player nose position per frame (for intention-based detection)
+5. Pose keypoint confidence values
+6. Video dimensions (width, height)
+
+**Optional Inputs** (for turning zone suppression):
+1. Cone/marker positions (for defining turning zones)
+2. Turning zone radii
+
+**Key Functions to Implement**:
+1. `determine_facing_direction(nose_pos, hip_pos) → "LEFT"/"RIGHT"/None`
+2. `is_ball_behind_intention(ball_pos, hip_pos, facing) → (bool, position_str)`
+3. `is_ball_behind_momentum(ball_pos, hip_pos, movement_dir) → bool`
+4. `update_ball_tracking_state(visible, in_edge, edge_side) → new_state`
+
+**Coordinate System Assumptions**:
+- X increases left-to-right (0 = left edge, video_width = right edge)
+- Y increases top-to-bottom (typical video coordinates)
+- All positions in pixel space (not normalized)
+
+---
 
 ## Migration Notes (5-cone → 3-cone)
 
