@@ -16,6 +16,7 @@ from .primitives import (
     draw_momentum_arrow,
     get_ball_momentum_color,
     draw_ball_momentum_arrow,
+    calculate_ball_vertical_deviation,
     draw_intention_arrow,
     draw_dashed_line,
     draw_debug_axes,
@@ -31,6 +32,7 @@ from .indicators import (
     draw_off_screen_indicator,
     draw_return_counter,
     draw_unified_tracking_indicator,
+    draw_vertical_deviation_counter,
 )
 
 __all__ = [
@@ -46,6 +48,7 @@ __all__ = [
     'draw_momentum_arrow',
     'get_ball_momentum_color',
     'draw_ball_momentum_arrow',
+    'calculate_ball_vertical_deviation',
     'draw_intention_arrow',
     'draw_dashed_line',
     'draw_debug_axes',
@@ -59,4 +62,5 @@ __all__ = [
     'draw_off_screen_indicator',
     'draw_return_counter',
     'draw_unified_tracking_indicator',
+    'draw_vertical_deviation_counter',
 ]

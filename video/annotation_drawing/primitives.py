@@ -242,6 +242,51 @@ def draw_ball_momentum_arrow(
     )
 
 
+def calculate_ball_vertical_deviation(
+    dx: float,
+    dy: float,
+    magnitude: float,
+    threshold_degrees: float = 60.0
+) -> Tuple[bool, Optional[str], float]:
+    """
+    Calculate if ball momentum is deviating vertically from horizontal path.
+
+    In a triple cone drill, the ball should mostly move left-right (horizontal).
+    This function detects when the ball is moving significantly up or down.
+
+    Args:
+        dx: Horizontal velocity component (positive = right)
+        dy: Vertical velocity component (positive = down, in video coords)
+        magnitude: Total velocity magnitude
+        threshold_degrees: Angle from horizontal to consider "vertical" (default 60°)
+
+    Returns:
+        (is_deviating, direction, angle_from_horizontal)
+        - is_deviating: True if angle > threshold
+        - direction: "UP" (dy < 0) or "DOWN" (dy > 0) or None
+        - angle_from_horizontal: 0-90 degrees (0 = pure horizontal, 90 = pure vertical)
+    """
+    import math
+
+    if magnitude < 0.001:
+        return False, None, 0.0
+
+    # Calculate angle from horizontal (0-90 degrees)
+    # atan2(|dy|, |dx|) gives angle from X-axis
+    angle_rad = math.atan2(abs(dy), abs(dx))
+    angle_degrees = math.degrees(angle_rad)
+
+    is_deviating = angle_degrees > threshold_degrees
+
+    if is_deviating:
+        # In video coordinates, dy < 0 means moving UP (toward top of screen)
+        direction = "UP" if dy < 0 else "DOWN"
+    else:
+        direction = None
+
+    return is_deviating, direction, angle_degrees
+
+
 def draw_intention_arrow(
     frame: np.ndarray,
     persons: dict,

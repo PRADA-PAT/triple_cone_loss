@@ -402,3 +402,61 @@ def draw_unified_tracking_indicator(
     # Draw text
     cv2.putText(frame, text, (pos_x, pos_y), font,
                 font_scale, color, thickness, cv2.LINE_AA)
+
+
+def draw_vertical_deviation_counter(
+    frame: np.ndarray,
+    count: int,
+    is_active: bool,
+    direction: Optional[str],
+    config: TripleConeAnnotationConfig,
+    x_offset: int = 0
+) -> None:
+    """
+    Draw vertical deviation counter showing ball is moving UP or DOWN.
+
+    In a triple cone drill, the ball should mostly move horizontally.
+    This counter indicates when the ball momentum is deviating vertically.
+
+    Args:
+        frame: Video frame to draw on
+        count: Number of consecutive frames with vertical deviation
+        is_active: True if currently deviating, False if showing persist display
+        direction: "UP" or "DOWN" (direction of vertical deviation)
+        config: Annotation configuration
+        x_offset: Horizontal offset (for sidebar)
+    """
+    if count <= 0:
+        return
+
+    dir_str = direction if direction else "?"
+    text = f"VERT DEV ({dir_str}): {count}f"
+
+    x = x_offset + config.VERTICAL_DEVIATION_COUNTER_POS_X
+    y = config.VERTICAL_DEVIATION_COUNTER_POS_Y
+
+    # Choose color based on direction and active state
+    if is_active:
+        if direction == "UP":
+            color = config.VERTICAL_DEVIATION_UP_COLOR
+        else:  # DOWN
+            color = config.VERTICAL_DEVIATION_DOWN_COLOR
+    else:
+        color = config.VERTICAL_DEVIATION_PERSIST_COLOR
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = config.VERTICAL_DEVIATION_COUNTER_FONT_SCALE
+    thickness = max(1, int(2 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+    (tw, th), _ = cv2.getTextSize(text, font, font_scale, thickness)
+
+    # Scale padding proportionally
+    pad_x = max(2, int(5 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+    pad_y = max(4, int(10 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+
+    # Draw background box
+    cv2.rectangle(frame, (x - pad_x, y - th - pad_y),
+                  (x + tw + pad_x * 2, y + pad_y), (0, 0, 0), -1)
+
+    # Draw text
+    cv2.putText(frame, text, (x, y), font,
+                font_scale, color, thickness, cv2.LINE_AA)

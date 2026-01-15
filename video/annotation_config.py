@@ -77,6 +77,21 @@ class TripleConeAnnotationConfig:
     BALL_MOMENTUM_SPEED_LOW: float = 5.0
     BALL_MOMENTUM_SPEED_HIGH: float = 120.0  # Ball moves faster than player
 
+    # Ball vertical deviation detection (for detecting ball going up/down instead of left/right)
+    DETECT_BALL_VERTICAL_DEVIATION: bool = True
+    VERTICAL_DEVIATION_THRESHOLD: float = 30.0  # Degrees from horizontal (sensitive - catches slight deviations)
+    VERTICAL_DEVIATION_SUSTAINED_FRAMES: int = 10  # ~0.33s at 30fps
+    VERTICAL_DEVIATION_MIN_SPEED: float = 5.0  # Min speed to detect (ignore stationary)
+
+    # Vertical deviation visualization
+    VERTICAL_DEVIATION_UP_COLOR: Tuple[int, int, int] = (255, 0, 255)    # Magenta for UP
+    VERTICAL_DEVIATION_DOWN_COLOR: Tuple[int, int, int] = (0, 255, 255)  # Yellow for DOWN
+    VERTICAL_DEVIATION_PERSIST_COLOR: Tuple[int, int, int] = (0, 165, 255)  # Orange persist
+    VERTICAL_DEVIATION_COUNTER_POS_X: int = 50
+    VERTICAL_DEVIATION_COUNTER_POS_Y: int = 350  # Below other counters
+    VERTICAL_DEVIATION_COUNTER_FONT_SCALE: float = 1.2
+    VERTICAL_DEVIATION_PERSIST_SECONDS: float = 3.0
+
     # Ball position relative to player settings
     # NOTE: Must match detection/ball_control_detector.py thresholds
     DRAW_BALL_POSITION: bool = True
@@ -260,6 +275,8 @@ def scale_config_for_resolution(config: TripleConeAnnotationConfig, video_width:
     config.OFF_SCREEN_POS_Y = int(config.OFF_SCREEN_POS_Y * resolution_scale)
     config.RETURN_COUNTER_POS_X = int(config.RETURN_COUNTER_POS_X * resolution_scale)
     config.RETURN_COUNTER_POS_Y = int(config.RETURN_COUNTER_POS_Y * resolution_scale)
+    config.VERTICAL_DEVIATION_COUNTER_POS_X = int(config.VERTICAL_DEVIATION_COUNTER_POS_X * resolution_scale)
+    config.VERTICAL_DEVIATION_COUNTER_POS_Y = int(config.VERTICAL_DEVIATION_COUNTER_POS_Y * resolution_scale)
 
     # Scale sidebar dimensions
     config.SIDEBAR_WIDTH = max(200, int(config.SIDEBAR_WIDTH * resolution_scale))
@@ -273,6 +290,7 @@ def scale_config_for_resolution(config: TripleConeAnnotationConfig, video_width:
     config.EDGE_COUNTER_FONT_SCALE *= font_scale
     config.OFF_SCREEN_FONT_SCALE *= font_scale
     config.RETURN_COUNTER_FONT_SCALE *= font_scale
+    config.VERTICAL_DEVIATION_COUNTER_FONT_SCALE *= font_scale
 
     # Scale line/arrow thicknesses
     config.MOMENTUM_THICKNESS = max(3, int(config.MOMENTUM_THICKNESS * font_scale))

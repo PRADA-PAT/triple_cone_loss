@@ -50,6 +50,7 @@ try:
         draw_skeleton,
         draw_momentum_arrow,
         draw_ball_momentum_arrow,
+        calculate_ball_vertical_deviation,
         draw_intention_arrow,
         draw_debug_axes,
         draw_edge_zones,
@@ -61,6 +62,7 @@ try:
         draw_off_screen_indicator,
         draw_return_counter,
         draw_unified_tracking_indicator,
+        draw_vertical_deviation_counter,
     )
     from .annotation_analysis import (
         determine_ball_position_relative_to_player,
@@ -88,6 +90,7 @@ except ImportError:
         draw_skeleton,
         draw_momentum_arrow,
         draw_ball_momentum_arrow,
+        calculate_ball_vertical_deviation,
         draw_intention_arrow,
         draw_debug_axes,
         draw_edge_zones,
@@ -99,6 +102,7 @@ except ImportError:
         draw_off_screen_indicator,
         draw_return_counter,
         draw_unified_tracking_indicator,
+        draw_vertical_deviation_counter,
     )
     from annotation_analysis import (
         determine_ball_position_relative_to_player,
@@ -238,6 +242,13 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
     unified_persist_timer: int = 0
     unified_persist_side: str = "NONE"
     unified_persist_frames = int(config.UNIFIED_COUNTER_PERSIST_SECONDS * fps)
+
+    # Vertical deviation tracking (ball going UP/DOWN instead of LEFT/RIGHT)
+    vertical_deviation_counter: int = 0
+    vertical_deviation_display_value: int = 0
+    vertical_deviation_display_timer: int = 0
+    vertical_deviation_direction: str = None  # "UP" or "DOWN"
+    vertical_deviation_persist_frames = int(config.VERTICAL_DEVIATION_PERSIST_SECONDS * fps)
 
     for frame_id in tqdm(range(total_frames), desc="  Annotating", unit="frame"):
         ret, video_frame = cap.read()
@@ -411,6 +422,37 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
             if return_display_timer > 0 and not ball_is_off_screen:
                 return_display_timer -= 1
 
+        # Vertical deviation detection (ball going UP/DOWN instead of LEFT/RIGHT)
+        if config.DETECT_BALL_VERTICAL_DEVIATION and ball_center and previous_ball:
+            dx = ball_center[0] - previous_ball[0]
+            dy = ball_center[1] - previous_ball[1]
+            magnitude = np.sqrt(dx * dx + dy * dy)
+
+            if magnitude >= config.VERTICAL_DEVIATION_MIN_SPEED:
+                is_deviating, direction, angle = calculate_ball_vertical_deviation(
+                    dx, dy, magnitude, config.VERTICAL_DEVIATION_THRESHOLD
+                )
+
+                if is_deviating:
+                    vertical_deviation_counter += 1
+                    vertical_deviation_display_value = vertical_deviation_counter
+                    vertical_deviation_display_timer = vertical_deviation_persist_frames
+                    vertical_deviation_direction = direction
+                else:
+                    if vertical_deviation_counter > 0:
+                        vertical_deviation_display_value = vertical_deviation_counter
+                        vertical_deviation_display_timer = vertical_deviation_persist_frames
+                    vertical_deviation_counter = 0
+            else:
+                # Ball moving too slowly to detect deviation
+                if vertical_deviation_counter > 0:
+                    vertical_deviation_display_value = vertical_deviation_counter
+                    vertical_deviation_display_timer = vertical_deviation_persist_frames
+                vertical_deviation_counter = 0
+
+        if vertical_deviation_display_timer > 0:
+            vertical_deviation_display_timer -= 1
+
         # === DRAW EVERYTHING ===
 
         # 1. Turning zones
@@ -519,6 +561,16 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
         if not config.UNIFIED_TRACKING_ENABLED:
             if return_display_timer > 0 and not ball_is_off_screen:
                 draw_return_counter(canvas, return_display_value, config, x_offset=config.SIDEBAR_WIDTH)
+
+        # 15. Vertical deviation counter
+        if config.DETECT_BALL_VERTICAL_DEVIATION:
+            if vertical_deviation_display_timer > 0 or vertical_deviation_counter > 0:
+                draw_vertical_deviation_counter(
+                    canvas, vertical_deviation_display_value,
+                    is_active=(vertical_deviation_counter > 0),
+                    direction=vertical_deviation_direction,
+                    config=config, x_offset=config.SIDEBAR_WIDTH
+                )
 
         out.write(canvas)
 
