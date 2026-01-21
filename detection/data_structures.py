@@ -43,6 +43,54 @@ class EventType(Enum):
     BALL_BEHIND_INTENTION = "ball_behind_intention"  # Ball behind relative to facing direction
 
 
+# =============================================================================
+# MULTI-DRILL CONFIGURATION DATA MODELS
+# =============================================================================
+
+
+class ConeType(Enum):
+    """Types of cones in a drill configuration."""
+    TURN = "turn"
+    AREA = "area"
+    WEAVE = "weave"
+
+
+@dataclass
+class ConeDefinition:
+    """Single cone definition from config."""
+    position: int          # 0-indexed, left-to-right
+    type: ConeType
+    label: str             # e.g., "turn_cone_1", "area_cone_2"
+
+
+@dataclass
+class DrillTypeConfig:
+    """Configuration for a drill type."""
+    id: str                # e.g., "triple_cone"
+    name: str              # e.g., "Triple Cone Drill"
+    cone_count: int
+    cones: List[ConeDefinition]
+
+    def get_turn_cones(self) -> List[ConeDefinition]:
+        """Return all turn cones."""
+        return [c for c in self.cones if c.type == ConeType.TURN]
+
+    def get_area_cones(self) -> List[ConeDefinition]:
+        """Return all area cones."""
+        return [c for c in self.cones if c.type == ConeType.AREA]
+
+    def get_weave_cones(self) -> List[ConeDefinition]:
+        """Return all weave cones."""
+        return [c for c in self.cones if c.type == ConeType.WEAVE]
+
+
+@dataclass
+class DetectedCone:
+    """A cone detected in frame with assigned config."""
+    position: Tuple[float, float]  # (x, y) pixel coordinates
+    definition: ConeDefinition     # Linked config definition
+
+
 class DrillDirection(Enum):
     """Direction of travel in drill."""
     FORWARD = "forward"    # CONE1 → CONE2/CONE3 direction (increasing X)
@@ -203,6 +251,52 @@ class TripleConeLayout:
             cone2=(cone2_x, cone2_y),
             cone3=(cone3_x, cone3_y),
         )
+
+
+@dataclass
+class ConeLayout:
+    """
+    Generic cone layout supporting N cones.
+
+    Used for drills with varying numbers of cones (3, 5, 7, etc.).
+    Cones are stored sorted left-to-right by X position.
+
+    Attributes:
+        cones: List of (x, y) positions sorted left-to-right
+        labels: Optional list of labels for each cone
+    """
+    cones: List[Tuple[float, float]]  # (x, y) positions sorted left-to-right
+    labels: Optional[List[str]] = None
+
+    @property
+    def cone_count(self) -> int:
+        """Number of cones in this layout."""
+        return len(self.cones)
+
+    def get_labeled_cones(self) -> List[Tuple[float, float, str]]:
+        """
+        Get cone positions with labels.
+
+        Returns:
+            List of (x, y, label) tuples for each cone
+        """
+        if self.labels and len(self.labels) == len(self.cones):
+            return [(c[0], c[1], self.labels[i]) for i, c in enumerate(self.cones)]
+        return [(c[0], c[1], f"CONE{i+1}") for i, c in enumerate(self.cones)]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON export."""
+        return {
+            'cone_count': self.cone_count,
+            'cones': [{'px': c[0], 'py': c[1]} for c in self.cones],
+            'labels': self.labels,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ConeLayout':
+        """Create from dictionary."""
+        cones = [(c['px'], c['py']) for c in data['cones']]
+        return cls(cones=cones, labels=data.get('labels'))
 
 
 # =============================================================================
