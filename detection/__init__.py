@@ -23,7 +23,9 @@ from .data_structures import (
     # Triple Cone structures (3-cone)
     TripleConeDrillPhase, TripleConeLayout,
     # Common structures
-    FrameData, LossEvent, DetectionResult
+    FrameData, LossEvent, DetectionResult,
+    # Multi-drill config types
+    ConeType, ConeDefinition, DrillTypeConfig, DetectedCone,
 )
 from .config import (
     # Triple Cone config
@@ -40,6 +42,7 @@ from .data_loader import (
     validate_data_alignment, get_frame_data, get_video_fps,
 )
 from .csv_exporter import CSVExporter, export_to_csv
+from .drill_config_loader import DrillConfigLoader, assign_cones_to_config
 from .turning_zones import (
     # Base zone class
     TurningZone,
@@ -61,6 +64,9 @@ __all__ = [
     'FrameData', 'LossEvent', 'DetectionResult',
     # Data structures - Triple Cone (3-cone)
     'TripleConeDrillPhase', 'TripleConeLayout',
+    # Multi-drill config types
+    'ConeType', 'ConeDefinition', 'DrillTypeConfig', 'DetectedCone',
+    'DrillConfigLoader', 'assign_cones_to_config',
     # Configuration
     'AppConfig', 'TripleConeDrillConfig', 'DrillType',
     'DetectionConfig', 'PathConfig', 'VisualizationConfig', 'DetectionMode',

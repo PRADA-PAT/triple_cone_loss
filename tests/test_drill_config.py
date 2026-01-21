@@ -302,3 +302,23 @@ class TestAssignConesToConfig:
         assert result[3].definition.type == ConeType.WEAVE
         assert result[6].definition.type == ConeType.TURN
         assert result[6].definition.label == "turn_cone_2"
+
+
+class TestModuleExports:
+    """Tests for module-level exports."""
+
+    def test_import_from_detection(self):
+        """Test importing new types from detection module."""
+        from detection import (
+            ConeType,
+            ConeDefinition,
+            DrillTypeConfig,
+            DetectedCone,
+            DrillConfigLoader,
+            assign_cones_to_config,
+        )
+
+        # Verify they're the right types
+        assert ConeType.TURN.value == "turn"
+        assert DrillConfigLoader is not None
+        assert callable(assign_cones_to_config)
