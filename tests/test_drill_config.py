@@ -102,3 +102,35 @@ class TestDetectedCone:
         assert detected.position == (100.0, 200.0)
         assert detected.definition.label == "turn_cone_1"
         assert detected.definition.type == ConeType.TURN
+
+
+from pathlib import Path
+
+
+class TestDrillTypesConfigFile:
+    """Tests for drill_types_config.yaml file."""
+
+    def test_config_file_exists(self):
+        """Test that the config file exists."""
+        config_path = Path(__file__).parent.parent / "detection" / "drill_types_config.yaml"
+        assert config_path.exists(), f"Config file not found at {config_path}"
+
+    def test_config_file_has_drill_types(self):
+        """Test that config file has drill_types key."""
+        import yaml
+        config_path = Path(__file__).parent.parent / "detection" / "drill_types_config.yaml"
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        assert "drill_types" in config
+        assert len(config["drill_types"]) >= 1
+
+    def test_triple_cone_defined(self):
+        """Test that triple_cone drill is defined."""
+        import yaml
+        config_path = Path(__file__).parent.parent / "detection" / "drill_types_config.yaml"
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        assert "triple_cone" in config["drill_types"]
+        tc = config["drill_types"]["triple_cone"]
+        assert tc["cone_count"] == 3
+        assert len(tc["cones"]) == 3

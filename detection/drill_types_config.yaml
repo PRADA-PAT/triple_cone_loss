@@ -1,0 +1,63 @@
+# Drill type definitions
+# Cones are listed left-to-right as detected in frame
+
+drill_types:
+  triple_cone:
+    name: "Triple Cone Drill"
+    cone_count: 3
+    cones:
+      - position: 0
+        type: turn
+        label: turn_cone_3
+      - position: 1
+        type: turn
+        label: turn_cone_2
+      - position: 2
+        type: turn
+        label: turn_cone_1
+
+  seven_cone_weave:
+    name: "7 Cone Weave"
+    cone_count: 7
+    cones:
+      - position: 0
+        type: turn
+        label: turn_cone_1
+      - position: 1
+        type: weave
+        label: cone_2
+      - position: 2
+        type: weave
+        label: cone_3
+      - position: 3
+        type: weave
+        label: cone_4
+      - position: 4
+        type: weave
+        label: cone_5
+      - position: 5
+        type: weave
+        label: cone_6
+      - position: 6
+        type: turn
+        label: turn_cone_2
+
+  chest_control:
+    name: "Chest Control Drill"
+    cone_count: 5
+    cones:
+      - position: 0
+        type: turn
+        label: turn_cone_1
+      - position: 1
+        type: area
+        label: area_cone_1
+      - position: 2
+        type: area
+        label: area_cone_2
+      - position: 3
+        type: area
+        label: area_cone_3
+      - position: 4
+        type: area
+        label: area_cone_4
