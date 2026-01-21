@@ -3,7 +3,7 @@ import yaml
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .data_structures import ConeType, ConeDefinition, DrillTypeConfig
+from .data_structures import ConeType, ConeDefinition, DrillTypeConfig, DetectedCone
 
 
 class DrillConfigLoader:
@@ -79,3 +79,38 @@ class DrillConfigLoader:
             List of DrillTypeConfig objects with matching cone count
         """
         return [d for d in self._drill_types.values() if d.cone_count == count]
+
+
+def assign_cones_to_config(
+    detected_positions: List[tuple],
+    drill_config: DrillTypeConfig
+) -> List[DetectedCone]:
+    """Match detected cone positions to config definitions.
+
+    Sorts detected positions left-to-right by X coordinate and assigns
+    each to the corresponding cone definition from the config.
+
+    Args:
+        detected_positions: List of (x, y) tuples for detected cone positions
+        drill_config: DrillTypeConfig specifying expected cones
+
+    Returns:
+        List of DetectedCone objects with positions linked to definitions
+
+    Raises:
+        ValueError: If number of detected positions doesn't match config
+    """
+    if len(detected_positions) != drill_config.cone_count:
+        raise ValueError(
+            f"Expected {drill_config.cone_count} cones, "
+            f"detected {len(detected_positions)}"
+        )
+
+    # Sort left-to-right by x coordinate
+    sorted_positions = sorted(detected_positions, key=lambda p: p[0])
+
+    # Assign each position to its config definition
+    return [
+        DetectedCone(position=pos, definition=cone_def)
+        for pos, cone_def in zip(sorted_positions, drill_config.cones)
+    ]

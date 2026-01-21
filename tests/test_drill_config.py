@@ -226,3 +226,79 @@ drill_types:
 
         loader = DrillConfigLoader(config_path=config_file)
         assert "test_drill" in loader.list_drill_types()
+
+
+class TestAssignConesToConfig:
+    """Tests for assign_cones_to_config function."""
+
+    def test_assign_cones_basic(self):
+        """Test assigning detected positions to config."""
+        from detection.drill_config_loader import DrillConfigLoader, assign_cones_to_config
+
+        loader = DrillConfigLoader()
+        config = loader.get_drill_type("triple_cone")
+
+        # Positions detected left-to-right
+        detected_positions = [(100.0, 300.0), (500.0, 300.0), (900.0, 300.0)]
+
+        result = assign_cones_to_config(detected_positions, config)
+
+        assert len(result) == 3
+        assert result[0].position == (100.0, 300.0)
+        assert result[0].definition.label == "turn_cone_3"  # leftmost
+        assert result[2].position == (900.0, 300.0)
+        assert result[2].definition.label == "turn_cone_1"  # rightmost
+
+    def test_assign_cones_unsorted_input(self):
+        """Test that unsorted input gets sorted left-to-right."""
+        from detection.drill_config_loader import DrillConfigLoader, assign_cones_to_config
+
+        loader = DrillConfigLoader()
+        config = loader.get_drill_type("triple_cone")
+
+        # Positions in random order
+        detected_positions = [(900.0, 300.0), (100.0, 300.0), (500.0, 300.0)]
+
+        result = assign_cones_to_config(detected_positions, config)
+
+        # Should be sorted and assigned correctly
+        assert result[0].position == (100.0, 300.0)  # leftmost
+        assert result[0].definition.label == "turn_cone_3"
+        assert result[1].position == (500.0, 300.0)  # middle
+        assert result[1].definition.label == "turn_cone_2"
+        assert result[2].position == (900.0, 300.0)  # rightmost
+        assert result[2].definition.label == "turn_cone_1"
+
+    def test_assign_cones_wrong_count_raises(self):
+        """Test that mismatched cone count raises ValueError."""
+        from detection.drill_config_loader import DrillConfigLoader, assign_cones_to_config
+
+        loader = DrillConfigLoader()
+        config = loader.get_drill_type("triple_cone")  # expects 3
+
+        detected_positions = [(100.0, 300.0), (500.0, 300.0)]  # only 2
+
+        with pytest.raises(ValueError, match="Expected 3 cones"):
+            assign_cones_to_config(detected_positions, config)
+
+    def test_assign_cones_seven_cone(self):
+        """Test assigning 7 cones."""
+        from detection.drill_config_loader import DrillConfigLoader, assign_cones_to_config
+
+        loader = DrillConfigLoader()
+        config = loader.get_drill_type("seven_cone_weave")
+
+        # 7 positions left-to-right
+        detected_positions = [
+            (100.0, 300.0), (200.0, 300.0), (300.0, 300.0), (400.0, 300.0),
+            (500.0, 300.0), (600.0, 300.0), (700.0, 300.0)
+        ]
+
+        result = assign_cones_to_config(detected_positions, config)
+
+        assert len(result) == 7
+        assert result[0].definition.type == ConeType.TURN
+        assert result[0].definition.label == "turn_cone_1"
+        assert result[3].definition.type == ConeType.WEAVE
+        assert result[6].definition.type == ConeType.TURN
+        assert result[6].definition.label == "turn_cone_2"
