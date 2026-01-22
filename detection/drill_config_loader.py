@@ -42,7 +42,8 @@ class DrillConfigLoader:
                 id=drill_id,
                 name=drill_data["name"],
                 cone_count=drill_data["cone_count"],
-                cones=cones
+                cones=cones,
+                path_patterns=drill_data.get("path_patterns", [])
             )
 
     def get_drill_type(self, drill_id: str) -> DrillTypeConfig:
@@ -79,6 +80,22 @@ class DrillConfigLoader:
             List of DrillTypeConfig objects with matching cone count
         """
         return [d for d in self._drill_types.values() if d.cone_count == count]
+
+    def detect_drill_type_from_path(self, path: str) -> Optional[str]:
+        """Auto-detect drill type from path by matching against configured patterns.
+
+        Args:
+            path: File or directory path to check
+
+        Returns:
+            Drill type ID (e.g., "triple_cone") if matched, None otherwise
+        """
+        path_lower = path.lower()
+        for drill_id, config in self._drill_types.items():
+            for pattern in config.path_patterns:
+                if pattern.lower() in path_lower:
+                    return drill_id
+        return None
 
 
 def assign_cones_to_config(

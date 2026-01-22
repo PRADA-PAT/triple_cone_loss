@@ -70,6 +70,7 @@ class DrillTypeConfig:
     name: str              # e.g., "Triple Cone Drill"
     cone_count: int
     cones: List[ConeDefinition]
+    path_patterns: List[str] = field(default_factory=list)  # Patterns for auto-detection
 
     def get_turn_cones(self) -> List[ConeDefinition]:
         """Return all turn cones."""

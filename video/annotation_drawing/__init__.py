@@ -11,6 +11,7 @@ from .sidebar import (
 from .primitives import (
     draw_bbox,
     draw_triple_cone_markers,
+    draw_cone_markers,
     draw_skeleton,
     get_momentum_color,
     draw_momentum_arrow,
@@ -43,6 +44,7 @@ __all__ = [
     # Primitives
     'draw_bbox',
     'draw_triple_cone_markers',
+    'draw_cone_markers',
     'draw_skeleton',
     'get_momentum_color',
     'draw_momentum_arrow',

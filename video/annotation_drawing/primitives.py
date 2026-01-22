@@ -4,7 +4,7 @@ Primitive drawing functions for Triple Cone annotation.
 Contains basic drawing operations: bounding boxes, skeleton, cone markers, arrows.
 """
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -16,6 +16,7 @@ try:
         SKELETON_CONNECTIONS,
         KEYPOINT_BODY_PART,
         KEYPOINT_COLORS,
+        CONE_COLOR_PALETTE,
     )
     from ..annotation_data.structures import ConeData
 except ImportError:
@@ -24,8 +25,15 @@ except ImportError:
         SKELETON_CONNECTIONS,
         KEYPOINT_BODY_PART,
         KEYPOINT_COLORS,
+        CONE_COLOR_PALETTE,
     )
     from annotation_data.structures import ConeData
+
+# Import DetectedCone for generic cone drawing
+try:
+    from detection.data_structures import DetectedCone
+except ImportError:
+    DetectedCone = None  # Will fail gracefully if not available
 
 
 def draw_bbox(frame: np.ndarray, x1: float, y1: float, x2: float, y2: float,
@@ -80,6 +88,50 @@ def draw_triple_cone_markers(
         )
         label_x = x1
         label_y = y1 - 8
+
+        # Background for label
+        cv2.rectangle(frame,
+                      (label_x - 2, label_y - text_height - 2),
+                      (label_x + text_width + 2, label_y + 2),
+                      (0, 0, 0), -1)
+        cv2.putText(frame, label, (label_x, label_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+
+
+def draw_cone_markers(
+    frame: np.ndarray,
+    detected_cones: List,  # List[DetectedCone]
+    config: TripleConeAnnotationConfig,
+    x_offset: int = 0
+) -> None:
+    """
+    Draw N cone markers using color palette.
+
+    Used by annotate_video.py for generic multi-drill support.
+    Each cone gets a color from CONE_COLOR_PALETTE based on its index.
+
+    Args:
+        frame: Canvas to draw on
+        detected_cones: List of DetectedCone objects with position and definition
+        config: Annotation config
+        x_offset: X offset for sidebar
+    """
+    for i, cone in enumerate(detected_cones):
+        color = CONE_COLOR_PALETTE[i % len(CONE_COLOR_PALETTE)]
+        x, y = cone.position
+        label = cone.definition.label
+
+        # Draw cone marker (filled circle with border)
+        center = (int(x) + x_offset, int(y))
+        cv2.circle(frame, center, 10, color, -1)
+        cv2.circle(frame, center, 10, (0, 0, 0), 2)
+
+        # Draw label above the cone
+        (text_width, text_height), _ = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+        )
+        label_x = center[0] - text_width // 2
+        label_y = center[1] - 18
 
         # Background for label
         cv2.rectangle(frame,

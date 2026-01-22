@@ -5,7 +5,7 @@ Handles loading and parsing parquet files for cone, ball, and pose data.
 """
 
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 import pandas as pd
 
@@ -91,13 +91,71 @@ def load_cone_positions_from_parquet(parquet_path: Path) -> Tuple[ConeData, Cone
     return (cones[0], cones[1], cones[2])
 
 
-def load_ball_data(parquet_path: Path) -> pd.DataFrame:
-    """Load ball detection data including interpolated flag for off-screen detection."""
+def load_all_cone_positions(parquet_path: Path) -> List[Tuple[float, float]]:
+    """
+    Load all cone positions from parquet file, sorted left-to-right by X.
+
+    Returns list of (x, y) tuples for any number of cones.
+    Used by annotate_video.py for generic multi-drill support.
+    """
+    cone_df = read_parquet_safe(parquet_path)
+
+    # Filter out NaN object_ids
+    cone_df = cone_df[cone_df['object_id'].notna()]
+
+    # Group by object_id and get mean position
+    positions = []
+    for obj_id in sorted(cone_df['object_id'].unique()):
+        obj_data = cone_df[cone_df['object_id'] == obj_id]
+        mean_x = obj_data['center_x'].mean()
+        mean_y = obj_data['center_y'].mean()
+
+        # Skip positions with NaN values
+        if pd.notna(mean_x) and pd.notna(mean_y):
+            positions.append((mean_x, mean_y))
+
+    # Sort by X position (left to right)
+    positions.sort(key=lambda p: p[0])
+
+    return positions
+
+
+def load_ball_data(parquet_path: Path, use_postprocessed: bool = True) -> pd.DataFrame:
+    """Load ball detection data including interpolated flag for off-screen detection.
+
+    Args:
+        parquet_path: Path to the football parquet file.
+        use_postprocessed: If True, use post-processed columns (_pp) which have
+            smoothing/stabilization applied. If False, use raw detection columns.
+            Falls back to raw columns if _pp columns don't exist.
+    """
     df = read_parquet_safe(parquet_path)
-    cols = ['frame_id', 'x1', 'y1', 'x2', 'y2', 'confidence']
+
+    # Check if post-processed columns exist
+    has_pp_cols = all(col in df.columns for col in ['x1_pp', 'y1_pp', 'x2_pp', 'y2_pp'])
+
+    if use_postprocessed and has_pp_cols:
+        # Use post-processed columns (smoothed/stabilized)
+        cols = ['frame_id', 'x1_pp', 'y1_pp', 'x2_pp', 'y2_pp', 'confidence']
+        # Rename to standard names for downstream compatibility
+        rename_map = {'x1_pp': 'x1', 'y1_pp': 'y1', 'x2_pp': 'x2', 'y2_pp': 'y2'}
+        using_pp = True
+    else:
+        # Use raw detection columns (either requested or fallback)
+        cols = ['frame_id', 'x1', 'y1', 'x2', 'y2', 'confidence']
+        rename_map = {}
+        using_pp = False
+
     if 'interpolated' in df.columns:
         cols.append('interpolated')
-    return df[cols].copy()
+
+    result = df[cols].copy()
+    if rename_map:
+        result = result.rename(columns=rename_map)
+
+    # Add metadata attribute for caller to check what was actually used
+    result.attrs['using_postprocessed'] = using_pp
+    return result
 
 
 def load_pose_data(parquet_path: Path) -> pd.DataFrame:

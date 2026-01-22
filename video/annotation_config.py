@@ -44,6 +44,9 @@ class TripleConeAnnotationConfig:
     FONT_SCALE: float = 0.5
     FONT_THICKNESS: int = 1
 
+    # Data source settings
+    USE_POSTPROCESSED_BALL: bool = True  # Use _pp columns (smoothed/stabilized) vs raw
+
     # Confidence thresholds
     MIN_KEYPOINT_CONFIDENCE: float = 0.3
     MIN_BBOX_CONFIDENCE: float = 0.1
@@ -188,6 +191,22 @@ class TripleConeAnnotationConfig:
     # Resolution scaling (set automatically based on video width)
     RESOLUTION_SCALE: float = 1.0  # Linear scale for positions (1.0 = 2816px reference)
     FONT_SCALE_FACTOR: float = 1.0  # Sqrt scale for fonts (gentler, stays readable)
+
+
+# Color palette for N-cone drills (BGR format for OpenCV)
+# Used by annotate_video.py for generic multi-drill support
+CONE_COLOR_PALETTE = [
+    (200, 200, 0),    # Teal (index 0)
+    (200, 100, 200),  # Purple (index 1)
+    (100, 200, 200),  # Orange (index 2)
+    (0, 200, 0),      # Green (index 3)
+    (200, 0, 200),    # Magenta (index 4)
+    (0, 200, 200),    # Yellow (index 5)
+    (200, 100, 100),  # Light blue (index 6)
+    (100, 100, 200),  # Salmon (index 7)
+    (150, 200, 100),  # Lime (index 8)
+    (100, 150, 200),  # Peach (index 9)
+]
 
 
 # Skeleton connections for pose visualization

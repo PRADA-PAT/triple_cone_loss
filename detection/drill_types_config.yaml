@@ -5,6 +5,12 @@ drill_types:
   triple_cone:
     name: "Triple Cone Drill"
     cone_count: 3
+    path_patterns:
+      - "_tc/"
+      - "_tc_"
+      - "triple_cone"
+      - "_triple/"
+      - "_triple_"
     cones:
       - position: 0
         type: turn
@@ -19,6 +25,11 @@ drill_types:
   seven_cone_weave:
     name: "7 Cone Weave"
     cone_count: 7
+    path_patterns:
+      - "7_cone_weave"
+      - "seven_cone"
+      - "passing_receiving_turning"
+      - "_7cone"
     cones:
       - position: 0
         type: turn
@@ -45,6 +56,10 @@ drill_types:
   chest_control:
     name: "Chest Control Drill"
     cone_count: 5
+    path_patterns:
+      - "chest_control"
+      - "_chest/"
+      - "_chest_"
     cones:
       - position: 0
         type: turn
