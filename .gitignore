@@ -238,3 +238,6 @@ temp/
 # Backup files
 *.bak
 *.backup
+
+# Git worktrees for isolated development
+.worktrees/
