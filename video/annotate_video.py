@@ -891,45 +891,97 @@ def main():
             print(f"\nTotal: {len(available)} videos")
         return 0
 
-    if not args.data_path and not args.all:
-        print("Error: Please specify a data path, use --list, or use --all")
+    if not args.data_path and not args.all and not args.drills_dir:
+        print("Error: Please specify a data path, use --list, use --all, or use --drills-dir")
         return 1
 
     if args.all:
-        available = get_available_videos(args.videos_dir, args.parquet_dir)
-        print(f"\n Processing ALL {len(available)} videos...\n")
+        if args.drills_dir:
+            # New drills/ folder mode - process all drills, all players
+            drill_folders = get_drills_structure(args.drills_dir, loader)
+            total_players = sum(len(d.players) for d in drill_folders)
+            print(f"\n Processing ALL {total_players} players across {len(drill_folders)} drills...\n")
 
-        success_count = 0
-        fail_count = 0
+            success_count = 0
+            fail_count = 0
+            skip_count = 0
+            player_num = 0
 
-        for i, (name, video_path, parquet_path) in enumerate(available, 1):
+            for drill in drill_folders:
+                drill_config = None
+                if drill.drill_type != "unknown":
+                    try:
+                        drill_config = loader.get_drill_type(drill.drill_type)
+                    except ValueError:
+                        pass
+
+                for player in drill.players:
+                    player_num += 1
+
+                    if player.has_output and not args.force:
+                        print(f"[{player_num}/{total_players}] Skipping {player.name} (already annotated)")
+                        skip_count += 1
+                        continue
+
+                    print(f"\n{'='*60}")
+                    print(f"[{player_num}/{total_players}] {drill.drill_path.name}/{player.name}")
+                    print(f"{'='*60}")
+
+                    if drill_config:
+                        print(f"  Drill type: {drill_config.name}")
+
+                    output_path = player.parquet_dir / f"{player.name}_annotated.mp4"
+                    config = TripleConeAnnotationConfig()
+                    success = annotate_video(player.video_path, player.parquet_dir, output_path, drill_config, config)
+
+                    if success:
+                        success_count += 1
+                    else:
+                        fail_count += 1
+
             print(f"\n{'='*60}")
-            print(f"[{i}/{len(available)}] Processing: {name}")
+            print(f" BATCH COMPLETE")
             print(f"{'='*60}")
+            print(f"  Processed: {success_count}")
+            print(f"  Skipped:   {skip_count}")
+            print(f"  Failed:    {fail_count}")
 
-            # Auto-detect drill type
-            drill_id = args.drill_type or loader.detect_drill_type_from_path(str(parquet_path))
-            drill_config = loader.get_drill_type(drill_id) if drill_id else None
+            return 0 if fail_count == 0 else 1
+        else:
+            # Legacy mode
+            available = get_available_videos(args.videos_dir, args.parquet_dir)
+            print(f"\n Processing ALL {len(available)} videos...\n")
 
-            if drill_config:
-                print(f"  Drill type: {drill_config.name}")
+            success_count = 0
+            fail_count = 0
 
-            output_path = parquet_path / f"{name}_annotated.mp4"
-            config = TripleConeAnnotationConfig()
-            success = annotate_video(video_path, parquet_path, output_path, drill_config, config)
+            for i, (name, video_path, parquet_path) in enumerate(available, 1):
+                print(f"\n{'='*60}")
+                print(f"[{i}/{len(available)}] Processing: {name}")
+                print(f"{'='*60}")
 
-            if success:
-                success_count += 1
-            else:
-                fail_count += 1
+                drill_id = args.drill_type or loader.detect_drill_type_from_path(str(parquet_path))
+                drill_config = loader.get_drill_type(drill_id) if drill_id else None
 
-        print(f"\n{'='*60}")
-        print(f" BATCH COMPLETE")
-        print(f"{'='*60}")
-        print(f"  Processed: {success_count}")
-        print(f"  Failed:    {fail_count}")
+                if drill_config:
+                    print(f"  Drill type: {drill_config.name}")
 
-        return 0 if fail_count == 0 else 1
+                output_path = parquet_path / f"{name}_annotated.mp4"
+                config = TripleConeAnnotationConfig()
+                success = annotate_video(video_path, parquet_path, output_path, drill_config, config)
+
+                if success:
+                    success_count += 1
+                else:
+                    fail_count += 1
+
+            print(f"\n{'='*60}")
+            print(f" BATCH COMPLETE")
+            print(f"{'='*60}")
+            print(f"  Processed: {success_count}")
+            print(f"  Failed:    {fail_count}")
+
+            return 0 if fail_count == 0 else 1
 
     # Single video processing
     data_path = args.data_path
