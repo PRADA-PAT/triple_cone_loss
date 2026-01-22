@@ -983,69 +983,80 @@ def main():
 
             return 0 if fail_count == 0 else 1
 
-    # Single video processing
-    data_path = args.data_path
+    # Single video/folder processing
+    if args.data_path:
+        data_path = args.data_path
 
-    # If data_path is a directory, use it directly
-    # Otherwise, search for matching video
-    if data_path.is_dir():
-        parquet_path = data_path
-        # Find video file
-        video_files = list(parquet_path.glob("*.mp4")) + list(parquet_path.glob("*.avi"))
-        if not video_files:
-            # Try parent directory for video
-            parent = parquet_path.parent
-            name = parquet_path.name.replace("_tc", "").replace("_triple", "")
-            video_files = list(parent.glob(f"*{name}*.mp4"))
+        # If data_path is a directory, use it directly
+        if data_path.is_dir():
+            parquet_path = data_path
 
-        if not video_files:
-            # Try videos directory
-            video_files = list(args.videos_dir.glob(f"*{parquet_path.name}*.mp4"))
+            # Find video file in the directory
+            video_files = list(parquet_path.glob("*.mp4")) + list(parquet_path.glob("*.MOV"))
+            source_videos = [v for v in video_files if "_annotated" not in v.name.lower()]
 
-        if not video_files:
-            print(f"Error: Cannot find video for {parquet_path}")
+            if not source_videos:
+                # Try parent directory for video (legacy mode)
+                parent = parquet_path.parent
+                name = parquet_path.name.replace("_tc", "").replace("_triple", "")
+                source_videos = list(parent.glob(f"*{name}*.mp4"))
+
+            if not source_videos:
+                # Try videos directory (legacy mode)
+                source_videos = list(args.videos_dir.glob(f"*{parquet_path.name}*.mp4"))
+
+            if not source_videos:
+                print(f"Error: Cannot find video for {parquet_path}")
+                return 1
+
+            video_path = source_videos[0]
+        else:
+            # Search by name in legacy mode
+            available = get_available_videos(args.videos_dir, args.parquet_dir)
+            search_term = str(data_path).lower()
+            match = None
+            for name, video_path, parquet_path in available:
+                if search_term in name.lower():
+                    match = (name, video_path, parquet_path)
+                    break
+
+            if not match:
+                print(f"Error: Video not found matching: {data_path}")
+                print("Use --list to see available videos")
+                return 1
+
+            name, video_path, parquet_path = match
+
+        # Auto-detect or use explicit drill type
+        drill_id = args.drill_type or loader.detect_drill_type_from_path(str(parquet_path))
+        drill_config = None
+        if drill_id:
+            try:
+                drill_config = loader.get_drill_type(drill_id)
+                print(f"\n Drill type: {drill_config.name}")
+            except ValueError:
+                print(f"\n Warning: Unknown drill type '{drill_id}', using auto-detection")
+
+        print(f"\n Annotating {video_path.name}...\n")
+
+        output_path = parquet_path / f"{parquet_path.name}_annotated.mp4"
+        config = TripleConeAnnotationConfig()
+        success = annotate_video(video_path, parquet_path, output_path, drill_config, config)
+
+        if success:
+            print(f"\n Done! Output: {output_path}")
+            return 0
+        else:
+            print("\n Annotation failed!")
             return 1
 
-        video_path = video_files[0]
-    else:
-        # Search by name
-        available = get_available_videos(args.videos_dir, args.parquet_dir)
-        search_term = str(data_path).lower()
-        match = None
-        for name, video_path, parquet_path in available:
-            if search_term in name.lower():
-                match = (name, video_path, parquet_path)
-                break
-
-        if not match:
-            print(f"Error: Video not found matching: {data_path}")
-            print("Use --list to see available videos")
-            return 1
-
-        name, video_path, parquet_path = match
-
-    # Auto-detect or use explicit drill type
-    drill_id = args.drill_type or loader.detect_drill_type_from_path(str(parquet_path))
-    drill_config = None
-    if drill_id:
-        try:
-            drill_config = loader.get_drill_type(drill_id)
-            print(f"\n Drill type: {drill_config.name}")
-        except ValueError:
-            print(f"\n Warning: Unknown drill type '{drill_id}', using auto-detection")
-
-    print(f"\n Annotating {video_path.name}...\n")
-
-    output_path = parquet_path / f"{parquet_path.name}_annotated.mp4"
-    config = TripleConeAnnotationConfig()
-    success = annotate_video(video_path, parquet_path, output_path, drill_config, config)
-
-    if success:
-        print(f"\n Done! Output: {output_path}")
-        return 0
-    else:
-        print("\n Annotation failed!")
+    # No data_path but drills_dir specified without --all - show help
+    if args.drills_dir and not args.all:
+        print("Error: Use --all with --drills-dir to process all, or specify a player folder path")
+        print("Example: python video/annotate_video.py drills/7_cone_weave/player_x/")
         return 1
+
+    return 0
 
 
 if __name__ == "__main__":
