@@ -37,6 +37,7 @@ try:
     from .annotation_utils import convert_to_h264, get_available_videos
     from .annotation_data import (
         BallTrackingState,
+        ConeData,
         load_all_cone_positions,
         load_ball_data,
         load_pose_data,
@@ -76,6 +77,7 @@ except ImportError:
     from annotation_utils import convert_to_h264, get_available_videos
     from annotation_data import (
         BallTrackingState,
+        ConeData,
         load_all_cone_positions,
         load_ball_data,
         load_pose_data,
@@ -119,32 +121,50 @@ from detection.turning_zones import TurningZone, TripleConeZoneConfig
 
 def create_zones_for_turn_cones(
     detected_cones: List[DetectedCone],
+    cone_data_list: List[ConeData],
     zone_config: TripleConeZoneConfig
 ) -> List[tuple]:
     """
     Create elliptical turning zones only for turn-type cones.
 
+    Uses per-cone perspective compression calculated from each cone's bounding
+    box aspect ratio. Cones closer to camera (larger bbox) get less vertical
+    squeeze than cones farther away (smaller bbox).
+
     Args:
         detected_cones: List of all detected cones with definitions
-        zone_config: Zone configuration with radius and stretch settings
+        cone_data_list: List of ConeData with bbox dimensions (same order as detected_cones)
+        zone_config: Zone configuration with base radius
 
     Returns:
         List of (label, TurningZone) tuples for turn-type cones only
     """
     zones = []
-    for cone in detected_cones:
+    for cone, cone_data in zip(detected_cones, cone_data_list):
         if cone.definition.type == ConeType.TURN:
             x, y = cone.position
+
+            # Calculate per-cone stretch from bbox aspect ratio
+            # Bbox aspect (w/h) directly encodes perspective compression at this location
+            bbox_aspect = cone_data.width / cone_data.height if cone_data.height > 0 else 2.0
+
+            # Create zone with per-cone stretch
+            # semi_major = horizontal (wider by aspect ratio)
+            # semi_minor = vertical (reference size)
+            base_radius = zone_config.cone1_zone_radius
             zone = TurningZone(
                 name=cone.definition.label,
                 center_px=x,
                 center_py=y,
-                # Horizontal stretch (wider), vertical compression (shorter)
-                # Matches camera perspective looking at field from side
-                semi_major=zone_config.cone1_zone_radius * zone_config.stretch_x,  # Horizontal (wider)
-                semi_minor=zone_config.cone1_zone_radius / zone_config.stretch_y,  # Vertical (compressed)
+                semi_major=base_radius * bbox_aspect,  # Horizontal stretch from perspective
+                semi_minor=base_radius,                 # Vertical reference
             )
             zones.append((cone.definition.label, zone))
+
+            # Debug output
+            print(f"    {cone.definition.label}: bbox={cone_data.width:.1f}x{cone_data.height:.1f}, "
+                  f"aspect={bbox_aspect:.2f}, zone={base_radius * bbox_aspect:.0f}x{base_radius:.0f}")
+
     return zones
 
 
@@ -226,12 +246,15 @@ def annotate_video(
 
     print(f"  Loading cone positions from parquet...")
     try:
-        cone_positions = load_all_cone_positions(cone_parquet[0])
+        cone_data_list = load_all_cone_positions(cone_parquet[0])  # Returns List[ConeData]
     except Exception as e:
         print(f"  Error loading cones: {e}")
         return False
 
-    print(f"    Found {len(cone_positions)} cones")
+    print(f"    Found {len(cone_data_list)} cones")
+
+    # Extract positions as tuples for assign_cones_to_config
+    cone_positions = [cone_data.center for cone_data in cone_data_list]
 
     # Match cones to drill config
     if drill_config:
@@ -249,14 +272,14 @@ def annotate_video(
         from detection.data_structures import ConeDefinition
         detected_cones = [
             DetectedCone(
-                position=pos,
+                position=cone_data.center,
                 definition=ConeDefinition(
                     position=i,
                     type=ConeType.TURN,  # Treat all as turn cones for generic case
                     label=f"cone_{i+1}"
                 )
             )
-            for i, pos in enumerate(cone_positions)
+            for i, cone_data in enumerate(cone_data_list)
         ]
         print(f"    Using generic cone labels (no drill config matched)")
 
@@ -308,11 +331,12 @@ def annotate_video(
     scale_config_for_resolution(config, orig_width)
 
     # Create turning zones for turn-type cones only
-    print(f"  Creating turning zones...")
+    # Uses per-cone stretch based on bbox aspect ratio (perspective compression)
+    print(f"  Creating turning zones (per-cone perspective stretch)...")
     zone_config = TripleConeZoneConfig.default()
-    turn_zones = create_zones_for_turn_cones(detected_cones, zone_config)
+    turn_zones = create_zones_for_turn_cones(detected_cones, cone_data_list, zone_config)
     turn_cone_count = len(turn_zones)
-    print(f"    Created {turn_cone_count} turning zones (for turn-type cones)")
+    print(f"    Created {turn_cone_count} turning zones")
 
     canvas_width = config.SIDEBAR_WIDTH + orig_width
     canvas_height = orig_height

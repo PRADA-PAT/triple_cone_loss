@@ -91,33 +91,45 @@ def load_cone_positions_from_parquet(parquet_path: Path) -> Tuple[ConeData, Cone
     return (cones[0], cones[1], cones[2])
 
 
-def load_all_cone_positions(parquet_path: Path) -> List[Tuple[float, float]]:
+def load_all_cone_positions(parquet_path: Path) -> List[ConeData]:
     """
-    Load all cone positions from parquet file, sorted left-to-right by X.
+    Load all cone positions and dimensions from parquet file, sorted left-to-right by X.
 
-    Returns list of (x, y) tuples for any number of cones.
+    Returns list of ConeData objects for any number of cones.
+    Each ConeData includes center position and bbox dimensions (width, height).
     Used by annotate_video.py for generic multi-drill support.
+
+    The bbox dimensions are important for calculating per-cone perspective
+    compression - cones closer to camera appear larger and need less vertical
+    squeeze in their turning zones.
     """
     cone_df = read_parquet_safe(parquet_path)
 
     # Filter out NaN object_ids
     cone_df = cone_df[cone_df['object_id'].notna()]
 
-    # Group by object_id and get mean position
-    positions = []
+    # Group by object_id and get mean position + dimensions
+    cones = []
     for obj_id in sorted(cone_df['object_id'].unique()):
         obj_data = cone_df[cone_df['object_id'] == obj_id]
         mean_x = obj_data['center_x'].mean()
         mean_y = obj_data['center_y'].mean()
+        mean_width = obj_data['width'].mean() if 'width' in obj_data.columns else 15.0
+        mean_height = obj_data['height'].mean() if 'height' in obj_data.columns else 15.0
 
         # Skip positions with NaN values
         if pd.notna(mean_x) and pd.notna(mean_y):
-            positions.append((mean_x, mean_y))
+            cones.append(ConeData(
+                center_x=mean_x,
+                center_y=mean_y,
+                width=mean_width if pd.notna(mean_width) else 15.0,
+                height=mean_height if pd.notna(mean_height) else 15.0,
+            ))
 
     # Sort by X position (left to right)
-    positions.sort(key=lambda p: p[0])
+    cones.sort(key=lambda c: c.center_x)
 
-    return positions
+    return cones
 
 
 def load_ball_data(parquet_path: Path, use_postprocessed: bool = True) -> pd.DataFrame:
