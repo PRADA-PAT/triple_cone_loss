@@ -123,3 +123,85 @@ def get_available_videos(videos_dir: Path, parquet_dir: Path) -> List[Tuple[str,
             available.append((base_name, video_path, parquet_path))
 
     return available
+
+
+def get_drills_structure(drills_dir: Path, loader: 'DrillConfigLoader') -> List[DrillFolder]:
+    """
+    Scan drills folder and return structure of drill types and players.
+
+    Expected structure:
+        drills_dir/
+          {drill_type_folder}/
+            {player_folder}/
+              *.mp4 (source video)
+              *_cone.parquet
+              *_football.parquet
+              *_pose.parquet
+
+    Args:
+        drills_dir: Root directory containing drill type folders
+        loader: DrillConfigLoader for detecting drill types
+
+    Returns:
+        List of DrillFolder objects, each containing list of PlayerFolder objects
+    """
+    results = []
+
+    if not drills_dir.exists():
+        return results
+
+    for drill_path in sorted(drills_dir.iterdir()):
+        if not drill_path.is_dir() or drill_path.name.startswith('.'):
+            continue
+
+        # Detect drill type from folder name
+        drill_id = loader.detect_drill_type_from_path(str(drill_path))
+        if drill_id:
+            try:
+                config = loader.get_drill_type(drill_id)
+                drill_name = config.name
+            except ValueError:
+                drill_id = "unknown"
+                drill_name = f"{drill_path.name} (unknown)"
+        else:
+            drill_id = "unknown"
+            drill_name = f"{drill_path.name} (unknown)"
+
+        players = []
+        for player_path in sorted(drill_path.iterdir()):
+            if not player_path.is_dir() or player_path.name.startswith('.'):
+                continue
+
+            # Find source video (exclude annotated outputs)
+            videos = list(player_path.glob("*.mp4")) + list(player_path.glob("*.MOV"))
+            source_videos = [v for v in videos if "_annotated" not in v.name.lower()]
+            if not source_videos:
+                continue
+
+            # Check for required parquet files
+            has_cone = bool(list(player_path.glob("*_cone.parquet")))
+            has_ball = bool(list(player_path.glob("*_football.parquet")))
+            has_pose = bool(list(player_path.glob("*_pose.parquet")))
+
+            if not (has_cone and has_ball and has_pose):
+                continue
+
+            # Check for existing output
+            has_output = bool(list(player_path.glob("*_annotated.mp4")))
+
+            players.append(PlayerFolder(
+                name=player_path.name,
+                video_path=source_videos[0],
+                parquet_dir=player_path,
+                has_output=has_output
+            ))
+
+        if players:
+            results.append(DrillFolder(
+                drill_type=drill_id,
+                drill_name=drill_name,
+                drill_path=drill_path,
+                players=players
+            ))
+
+    return results
