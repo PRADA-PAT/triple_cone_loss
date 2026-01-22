@@ -139,8 +139,10 @@ def create_zones_for_turn_cones(
                 name=cone.definition.label,
                 center_px=x,
                 center_py=y,
-                semi_major=zone_config.cone1_zone_radius,
-                semi_minor=zone_config.cone1_zone_radius * zone_config.stretch_y,
+                # Horizontal stretch (wider), vertical compression (shorter)
+                # Matches camera perspective looking at field from side
+                semi_major=zone_config.cone1_zone_radius * zone_config.stretch_x,  # Horizontal (wider)
+                semi_minor=zone_config.cone1_zone_radius / zone_config.stretch_y,  # Vertical (compressed)
             )
             zones.append((cone.definition.label, zone))
     return zones
