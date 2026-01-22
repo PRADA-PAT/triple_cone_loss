@@ -122,52 +122,66 @@ from detection.turning_zones import TurningZone, TripleConeZoneConfig
 def create_zones_for_turn_cones(
     detected_cones: List[DetectedCone],
     cone_data_list: List[ConeData],
-    zone_config: TripleConeZoneConfig
+    zone_config: TripleConeZoneConfig,
+    image_height: int
 ) -> List[tuple]:
     """
     Create elliptical turning zones only for turn-type cones.
 
-    Uses per-cone perspective compression calculated from each cone's bounding
-    box aspect ratio. Cones closer to camera (larger bbox) get less vertical
-    squeeze than cones farther away (smaller bbox).
+    Uses Y-position based perspective model: cones higher in frame (farther from
+    camera) get more horizontal stretch, cones lower in frame (closer) get less.
+    This simulates how a circle on the ground plane appears as an ellipse due to
+    camera tilt.
 
     Args:
         detected_cones: List of all detected cones with definitions
         cone_data_list: List of ConeData with bbox dimensions (same order as detected_cones)
         zone_config: Zone configuration with base radius
+        image_height: Height of the video frame in pixels
 
     Returns:
         List of (label, TurningZone) tuples for turn-type cones only
     """
+    # Perspective squeeze constants - tune these visually
+    CONE_MULTIPLIER = 10.0  # Zone horizontal diameter = N times cone width
+    MIN_SQUEEZE = 2.5      # Compression at bottom of frame (closest to camera, rounder)
+    MAX_SQUEEZE = 5.5      # Compression at top of frame (farthest from camera, flatter)
+
     zones = []
     for cone, cone_data in zip(detected_cones, cone_data_list):
         if cone.definition.type == ConeType.TURN:
             x, y = cone.position
 
-            # Calculate per-cone stretch from bbox aspect ratio
-            # Bbox aspect (w/h) directly encodes perspective compression at this location
-            bbox_aspect = cone_data.width / cone_data.height if cone_data.height > 0 else 2.0
+            # Zone center at cone's BASE (bottom of bbox), not bbox center
+            center_y = y + (cone_data.height / 2)
 
-            # Additional squeeze factor - the bbox aspect alone may not be enough
-            # because the cone is 3D (has height) while the zone is on the ground
-            SQUEEZE_FACTOR = 2.5  # Increase to squeeze more vertically
+            # Horizontal diameter = CONE_MULTIPLIER * cone_width
+            # semi_major = half of horizontal diameter
+            semi_major = (CONE_MULTIPLIER / 2) * cone_data.width
 
-            # Create zone with per-cone stretch
-            # semi_major = horizontal (wider by aspect ratio * squeeze)
-            # semi_minor = vertical (reference size)
-            base_radius = zone_config.cone1_zone_radius
+            # Y-position based perspective model
+            # normalized_y: 0.0 at top (far), 1.0 at bottom (near)
+            normalized_y = center_y / image_height
+
+            # Linear interpolation: more squeeze at top, less at bottom
+            squeeze = MAX_SQUEEZE - (normalized_y * (MAX_SQUEEZE - MIN_SQUEEZE))
+
+            # Vertical axis compressed by perspective (squeeze > 1 means more compression)
+            semi_minor = semi_major / squeeze
+
+            # Create ellipse
             zone = TurningZone(
                 name=cone.definition.label,
                 center_px=x,
-                center_py=y,
-                semi_major=base_radius * bbox_aspect * SQUEEZE_FACTOR,  # Horizontal stretch
-                semi_minor=base_radius,                                  # Vertical reference
+                center_py=center_y,
+                semi_major=semi_major,   # Horizontal (5x cone width diameter)
+                semi_minor=semi_minor,   # Vertical (compressed by perspective)
             )
             zones.append((cone.definition.label, zone))
 
             # Debug output
-            print(f"    {cone.definition.label}: bbox={cone_data.width:.1f}x{cone_data.height:.1f}, "
-                  f"aspect={bbox_aspect:.2f}, zone={base_radius * bbox_aspect * SQUEEZE_FACTOR:.0f}x{base_radius:.0f}")
+            print(f"    {cone.definition.label}: cone_w={cone_data.width:.0f}, "
+                  f"squeeze={squeeze:.2f}, zone={semi_major*2:.0f}x{semi_minor*2:.0f} (diameter)")
 
     return zones
 
@@ -335,10 +349,10 @@ def annotate_video(
     scale_config_for_resolution(config, orig_width)
 
     # Create turning zones for turn-type cones only
-    # Uses per-cone stretch based on bbox aspect ratio (perspective compression)
-    print(f"  Creating turning zones (per-cone perspective stretch)...")
+    # Uses Y-position based perspective model (farther cones = flatter ellipses)
+    print(f"  Creating turning zones (Y-position perspective model)...")
     zone_config = TripleConeZoneConfig.default()
-    turn_zones = create_zones_for_turn_cones(detected_cones, cone_data_list, zone_config)
+    turn_zones = create_zones_for_turn_cones(detected_cones, cone_data_list, zone_config, orig_height)
     turn_cone_count = len(turn_zones)
     print(f"    Created {turn_cone_count} turning zones")
 
@@ -590,8 +604,9 @@ def annotate_video(
             turn_events=turn_tracker.get_recent_events(config.EVENT_LOG_MAX_EVENTS)
         )
 
-        # 4. Cone markers (N cones with palette colors)
-        draw_cone_markers(canvas, detected_cones, config, x_offset=config.SIDEBAR_WIDTH)
+        # 4. Cone markers (N cones with palette colors and bounding boxes)
+        draw_cone_markers(canvas, detected_cones, config, x_offset=config.SIDEBAR_WIDTH,
+                         cone_data_list=cone_data_list, draw_bbox=True)
 
         # 5. Ball bbox
         for ball in balls:
@@ -825,6 +840,16 @@ def main():
         choices=["original", "720p"],
         default="720p",
         help="Which resolution to process (720p uses downscaled videos/parquets)"
+    )
+    parser.add_argument(
+        "--drills-dir",
+        type=Path,
+        help="Directory containing drill type folders (e.g., drills/)"
+    )
+    parser.add_argument(
+        "--force", "-f",
+        action="store_true",
+        help="Re-process videos even if output already exists"
     )
 
     args = parser.parse_args()
