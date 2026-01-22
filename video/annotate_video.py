@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 try:
     from .annotation_config import TripleConeAnnotationConfig, scale_config_for_resolution, CONE_COLOR_PALETTE
-    from .annotation_utils import convert_to_h264, get_available_videos
+    from .annotation_utils import convert_to_h264, get_available_videos, get_drills_structure
     from .annotation_data import (
         BallTrackingState,
         ConeData,
@@ -74,7 +74,7 @@ try:
     from .turn_tracker import TripleConeTurnTracker
 except ImportError:
     from annotation_config import TripleConeAnnotationConfig, scale_config_for_resolution, CONE_COLOR_PALETTE
-    from annotation_utils import convert_to_h264, get_available_videos
+    from annotation_utils import convert_to_h264, get_available_videos, get_drills_structure
     from annotation_data import (
         BallTrackingState,
         ConeData,
