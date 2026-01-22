@@ -271,16 +271,22 @@ def annotate_video(
 
     print(f"    Found {len(cone_data_list)} cones")
 
+    # Match cones to drill config - filter if too many detected
+    if drill_config:
+        if len(cone_data_list) > drill_config.cone_count:
+            # More cones detected than expected - keep only the most reliable ones
+            print(f"    Detected {len(cone_data_list)} cones, config expects {drill_config.cone_count}")
+            print(f"    Filtering to top {drill_config.cone_count} by frame count...")
+            cone_data_list = load_all_cone_positions(cone_parquet[0], max_cones=drill_config.cone_count)
+            print(f"    Kept {len(cone_data_list)} most frequently detected cones")
+        elif len(cone_data_list) < drill_config.cone_count:
+            # Fewer cones than expected - fall back to generic mode
+            print(f"  Warning: Expected {drill_config.cone_count} cones, found {len(cone_data_list)}")
+            print(f"  Falling back to generic mode...")
+            drill_config = None
+
     # Extract positions as tuples for assign_cones_to_config
     cone_positions = [cone_data.center for cone_data in cone_data_list]
-
-    # Match cones to drill config
-    if drill_config:
-        if len(cone_positions) != drill_config.cone_count:
-            print(f"  Warning: Expected {drill_config.cone_count} cones, found {len(cone_positions)}")
-            print(f"  Proceeding with detected cones...")
-            # Create generic config for detected cone count
-            drill_config = None
 
     if drill_config:
         detected_cones = assign_cones_to_config(cone_positions, drill_config)

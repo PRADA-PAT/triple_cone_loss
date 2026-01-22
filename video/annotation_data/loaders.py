@@ -91,9 +91,15 @@ def load_cone_positions_from_parquet(parquet_path: Path) -> Tuple[ConeData, Cone
     return (cones[0], cones[1], cones[2])
 
 
-def load_all_cone_positions(parquet_path: Path) -> List[ConeData]:
+def load_all_cone_positions(parquet_path: Path, max_cones: int = None) -> List[ConeData]:
     """
     Load all cone positions and dimensions from parquet file, sorted left-to-right by X.
+
+    Args:
+        parquet_path: Path to cone parquet file
+        max_cones: If specified, keep only the top N cones by frame count.
+                   Cones with more detections are more reliable; this filters
+                   out spurious detections that appear in fewer frames.
 
     Returns list of ConeData objects for any number of cones.
     Each ConeData includes center position and bbox dimensions (width, height).
@@ -108,23 +114,42 @@ def load_all_cone_positions(parquet_path: Path) -> List[ConeData]:
     # Filter out NaN object_ids
     cone_df = cone_df[cone_df['object_id'].notna()]
 
-    # Group by object_id and get mean position + dimensions
-    cones = []
+    # Group by object_id and get mean position + dimensions + frame count
+    cone_stats = []
     for obj_id in sorted(cone_df['object_id'].unique()):
         obj_data = cone_df[cone_df['object_id'] == obj_id]
         mean_x = obj_data['center_x'].mean()
         mean_y = obj_data['center_y'].mean()
         mean_width = obj_data['width'].mean() if 'width' in obj_data.columns else 15.0
         mean_height = obj_data['height'].mean() if 'height' in obj_data.columns else 15.0
+        frame_count = len(obj_data)  # Number of frames this cone appears in
 
         # Skip positions with NaN values
         if pd.notna(mean_x) and pd.notna(mean_y):
-            cones.append(ConeData(
-                center_x=mean_x,
-                center_y=mean_y,
-                width=mean_width if pd.notna(mean_width) else 15.0,
-                height=mean_height if pd.notna(mean_height) else 15.0,
-            ))
+            cone_stats.append({
+                'center_x': mean_x,
+                'center_y': mean_y,
+                'width': mean_width if pd.notna(mean_width) else 15.0,
+                'height': mean_height if pd.notna(mean_height) else 15.0,
+                'frame_count': frame_count,
+            })
+
+    # If max_cones specified, keep only the most frequently detected cones
+    if max_cones is not None and len(cone_stats) > max_cones:
+        # Sort by frame_count descending, keep top N
+        cone_stats.sort(key=lambda c: c['frame_count'], reverse=True)
+        cone_stats = cone_stats[:max_cones]
+
+    # Convert to ConeData objects
+    cones = [
+        ConeData(
+            center_x=c['center_x'],
+            center_y=c['center_y'],
+            width=c['width'],
+            height=c['height'],
+        )
+        for c in cone_stats
+    ]
 
     # Sort by X position (left to right)
     cones.sort(key=lambda c: c.center_x)

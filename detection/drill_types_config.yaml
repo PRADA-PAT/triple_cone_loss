@@ -55,24 +55,75 @@ drill_types:
 
   chest_control:
     name: "Chest Control Drill"
-    cone_count: 5
+    cone_count: 12
     path_patterns:
       - "chest_control"
       - "_chest/"
       - "_chest_"
     cones:
+      # Left weave section (4 cones)
       - position: 0
         type: turn
-        label: turn_cone_1
+        label: turn_cone_left
       - position: 1
-        type: area
-        label: area_cone_1
+        type: weave
+        label: weave_cone_1
       - position: 2
-        type: area
-        label: area_cone_2
+        type: weave
+        label: weave_cone_2
       - position: 3
-        type: area
-        label: area_cone_3
+        type: weave
+        label: weave_cone_3
+      # Center square area (4 cones)
       - position: 4
         type: area
+        label: area_cone_1
+      - position: 5
+        type: area
+        label: area_cone_2
+      - position: 6
+        type: area
+        label: area_cone_3
+      - position: 7
+        type: area
         label: area_cone_4
+      # Right weave section (4 cones)
+      - position: 8
+        type: weave
+        label: weave_cone_4
+      - position: 9
+        type: weave
+        label: weave_cone_5
+      - position: 10
+        type: weave
+        label: weave_cone_6
+      - position: 11
+        type: turn
+        label: turn_cone_right
+
+  figure_of_8:
+    name: "Figure of 8 Drill"
+    cone_count: 5
+    path_patterns:
+      - "figure_of_8"
+      - "_f8/"
+      - "_f8_"
+      - "_f8"
+      - "fig8"
+    cones:
+      # Cones sorted left-to-right by X position
+      - position: 0
+        type: turn
+        label: turn_cone_left    # Leftmost cone (was gate2_left)
+      - position: 1
+        type: gate
+        label: gate2_right       # Part of gate 2
+      - position: 2
+        type: gate
+        label: gate1_left        # Part of gate 1
+      - position: 3
+        type: gate
+        label: gate1_right       # Part of gate 1
+      - position: 4
+        type: turn
+        label: turn_cone_start   # Start/rightmost cone
