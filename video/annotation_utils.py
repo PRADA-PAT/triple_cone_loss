@@ -5,8 +5,30 @@ Contains video discovery and codec conversion utilities.
 """
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from detection.drill_config_loader import DrillConfigLoader
+
+
+@dataclass
+class PlayerFolder:
+    """Represents a player's data folder within a drill."""
+    name: str
+    video_path: Path
+    parquet_dir: Path
+    has_output: bool
+
+
+@dataclass
+class DrillFolder:
+    """Represents a drill type folder containing player folders."""
+    drill_type: str      # from config or "unknown"
+    drill_name: str      # human readable name
+    drill_path: Path
+    players: List[PlayerFolder]
 
 
 def convert_to_h264(input_path: Path) -> Optional[Path]:
