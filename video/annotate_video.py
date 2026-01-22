@@ -865,16 +865,30 @@ def main():
         print(f"\n[720p MODE] Using downscaled videos and parquets\n")
 
     if args.list:
-        available = get_available_videos(args.videos_dir, args.parquet_dir)
-        print("\n Available videos:\n")
-        for name, video_path, parquet_path in available:
-            # Auto-detect drill type
-            drill_id = loader.detect_drill_type_from_path(str(parquet_path))
-            drill_label = f"[{drill_id}]" if drill_id else "[unknown]"
-            output_path = parquet_path / f"{name}_annotated.mp4"
-            status = "[done]" if output_path.exists() else "[    ]"
-            print(f"  {status} {name} {drill_label}")
-        print(f"\nTotal: {len(available)} videos")
+        if args.drills_dir:
+            # New drills/ folder mode
+            drill_folders = get_drills_structure(args.drills_dir, loader)
+            print(f"\nAvailable drills in {args.drills_dir}/:\n")
+            total_players = 0
+            for drill in drill_folders:
+                print(f"{drill.drill_path.name}/ ({drill.drill_name})")
+                for player in drill.players:
+                    status = "[done]" if player.has_output else "[    ]"
+                    print(f"  {status} {player.name}")
+                    total_players += 1
+                print()
+            print(f"Total: {total_players} players across {len(drill_folders)} drill types")
+        else:
+            # Legacy mode
+            available = get_available_videos(args.videos_dir, args.parquet_dir)
+            print("\n Available videos:\n")
+            for name, video_path, parquet_path in available:
+                drill_id = loader.detect_drill_type_from_path(str(parquet_path))
+                drill_label = f"[{drill_id}]" if drill_id else "[unknown]"
+                output_path = parquet_path / f"{name}_annotated.mp4"
+                status = "[done]" if output_path.exists() else "[    ]"
+                print(f"  {status} {name} {drill_label}")
+            print(f"\nTotal: {len(available)} videos")
         return 0
 
     if not args.data_path and not args.all:
