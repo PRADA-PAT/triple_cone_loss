@@ -148,22 +148,26 @@ def create_zones_for_turn_cones(
             # Bbox aspect (w/h) directly encodes perspective compression at this location
             bbox_aspect = cone_data.width / cone_data.height if cone_data.height > 0 else 2.0
 
+            # Additional squeeze factor - the bbox aspect alone may not be enough
+            # because the cone is 3D (has height) while the zone is on the ground
+            SQUEEZE_FACTOR = 2.5  # Increase to squeeze more vertically
+
             # Create zone with per-cone stretch
-            # semi_major = horizontal (wider by aspect ratio)
+            # semi_major = horizontal (wider by aspect ratio * squeeze)
             # semi_minor = vertical (reference size)
             base_radius = zone_config.cone1_zone_radius
             zone = TurningZone(
                 name=cone.definition.label,
                 center_px=x,
                 center_py=y,
-                semi_major=base_radius * bbox_aspect,  # Horizontal stretch from perspective
-                semi_minor=base_radius,                 # Vertical reference
+                semi_major=base_radius * bbox_aspect * SQUEEZE_FACTOR,  # Horizontal stretch
+                semi_minor=base_radius,                                  # Vertical reference
             )
             zones.append((cone.definition.label, zone))
 
             # Debug output
             print(f"    {cone.definition.label}: bbox={cone_data.width:.1f}x{cone_data.height:.1f}, "
-                  f"aspect={bbox_aspect:.2f}, zone={base_radius * bbox_aspect:.0f}x{base_radius:.0f}")
+                  f"aspect={bbox_aspect:.2f}, zone={base_radius * bbox_aspect * SQUEEZE_FACTOR:.0f}x{base_radius:.0f}")
 
     return zones
 
