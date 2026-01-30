@@ -196,16 +196,16 @@ class TripleConeAnnotationConfig:
 # Color palette for N-cone drills (BGR format for OpenCV)
 # Used by annotate_video.py for generic multi-drill support
 CONE_COLOR_PALETTE = [
-    (200, 200, 0),    # Teal (index 0)
-    (200, 100, 200),  # Purple (index 1)
-    (100, 200, 200),  # Orange (index 2)
-    (0, 200, 0),      # Green (index 3)
-    (200, 0, 200),    # Magenta (index 4)
-    (0, 200, 200),    # Yellow (index 5)
-    (200, 100, 100),  # Light blue (index 6)
-    (100, 100, 200),  # Salmon (index 7)
-    (150, 200, 100),  # Lime (index 8)
-    (100, 150, 200),  # Peach (index 9)
+    (255, 255, 0),    # Cyan (index 0) - bright, visible on grass
+    (255, 0, 255),    # Magenta (index 1) - bright pink
+    (0, 165, 255),    # Orange (index 2) - stands out on green
+    (255, 0, 0),      # Blue (index 3) - high contrast
+    (128, 0, 255),    # Hot pink (index 4)
+    (255, 255, 255),  # White (index 5) - replaced yellow, always visible
+    (255, 128, 0),    # Sky blue (index 6)
+    (0, 0, 255),      # Red (index 7) - high contrast on grass
+    (255, 0, 128),    # Purple (index 8)
+    (200, 200, 200),  # Light gray (index 9) - neutral, visible
 ]
 
 

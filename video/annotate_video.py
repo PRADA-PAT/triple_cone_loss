@@ -54,6 +54,7 @@ try:
         draw_intention_arrow,
         draw_debug_axes,
         draw_edge_zones,
+        draw_area_zone,
         draw_ball_position_indicator,
         draw_intention_position_indicator,
         draw_behind_counter,
@@ -94,6 +95,7 @@ except ImportError:
         draw_intention_arrow,
         draw_debug_axes,
         draw_edge_zones,
+        draw_area_zone,
         draw_ball_position_indicator,
         draw_intention_position_indicator,
         draw_behind_counter,
@@ -144,8 +146,8 @@ def create_zones_for_turn_cones(
     """
     # Perspective squeeze constants - tune these visually
     CONE_MULTIPLIER = 10.0  # Zone horizontal diameter = N times cone width
-    MIN_SQUEEZE = 2.5      # Compression at bottom of frame (closest to camera, rounder)
-    MAX_SQUEEZE = 5.5      # Compression at top of frame (farthest from camera, flatter)
+    MIN_SQUEEZE = 4.0      # Compression at bottom of frame (closest to camera, rounder)
+    MAX_SQUEEZE = 8.0      # Compression at top of frame (farthest from camera, flatter)
 
     zones = []
     for cone, cone_data in zip(detected_cones, cone_data_list):
@@ -180,7 +182,8 @@ def create_zones_for_turn_cones(
             zones.append((cone.definition.label, zone))
 
             # Debug output
-            print(f"    {cone.definition.label}: cone_w={cone_data.width:.0f}, "
+            print(f"    {cone.definition.label}: cone_w={cone_data.width:.0f}, cone_h={cone_data.height:.0f}, "
+                  f"bbox_center_y={y:.0f}, zone_center_y={center_y:.0f} (bottom of bbox), "
                   f"squeeze={squeeze:.2f}, zone={semi_major*2:.0f}x{semi_minor*2:.0f} (diameter)")
 
     return zones
@@ -610,11 +613,14 @@ def annotate_video(
             turn_events=turn_tracker.get_recent_events(config.EVENT_LOG_MAX_EVENTS)
         )
 
-        # 4. Cone markers (N cones with palette colors and bounding boxes)
+        # 4. Area zone (filled polygon connecting area-type cones)
+        canvas = draw_area_zone(canvas, detected_cones, config, x_offset=config.SIDEBAR_WIDTH)
+
+        # 5. Cone markers (N cones with palette colors and bounding boxes)
         draw_cone_markers(canvas, detected_cones, config, x_offset=config.SIDEBAR_WIDTH,
                          cone_data_list=cone_data_list, draw_bbox=True)
 
-        # 5. Ball bbox
+        # 6. Ball bbox
         for ball in balls:
             if ball['confidence'] >= config.MIN_BBOX_CONFIDENCE:
                 label = f"Ball {ball['confidence']:.2f}"

@@ -24,7 +24,7 @@ try:
 except ImportError:
     HAS_OPENCV = False
 
-from .data_structures import TripleConeLayout
+from .data_structures import TripleConeLayout, ConeLayout
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +204,72 @@ def load_triple_cone_layout_from_parquet(cone_parquet_path: str) -> TripleConeLa
         f"CONE1=({cone1[0]:.0f}, {cone1[1]:.0f}), "
         f"CONE2=({cone2[0]:.0f}, {cone2[1]:.0f}), "
         f"CONE3=({cone3[0]:.0f}, {cone3[1]:.0f})"
+    )
+
+    return layout
+
+
+def load_cone_layout_from_parquet(
+    cone_parquet_path: str,
+    expected_cone_count: Optional[int] = None,
+    labels: Optional[List[str]] = None
+) -> ConeLayout:
+    """
+    Load N cone positions from parquet file, sorted left-to-right by X.
+
+    This is a generic version of load_triple_cone_layout_from_parquet()
+    that supports any number of cones.
+
+    Args:
+        cone_parquet_path: Path to cone parquet file (*_cone.parquet)
+        expected_cone_count: Optional expected number of cones for validation.
+                            If provided and actual count differs, logs a warning.
+        labels: Optional list of labels for cones (e.g., ["CONE1", "CONE2", ...])
+
+    Returns:
+        ConeLayout with all cone positions sorted left-to-right
+
+    Raises:
+        FileNotFoundError: If parquet file doesn't exist
+        ValueError: If no cones found in file
+    """
+    path = Path(cone_parquet_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Cone parquet file not found: {path}")
+
+    logger.info(f"Loading cone positions from parquet: {path.name}")
+
+    cone_df = read_parquet_safe(path)
+
+    if cone_df.empty:
+        raise ValueError(f"Cone parquet file is empty: {path}")
+
+    # Group by object_id and compute mean position across all frames
+    positions = []
+    for obj_id in sorted(cone_df['object_id'].unique()):
+        obj_data = cone_df[cone_df['object_id'] == obj_id]
+        mean_x = obj_data['center_x'].mean()
+        mean_y = obj_data['center_y'].mean()
+        positions.append((mean_x, mean_y))
+
+    # Sort by X position (left to right)
+    positions.sort(key=lambda p: p[0])
+
+    if len(positions) == 0:
+        raise ValueError(f"No cones found in parquet: {path}")
+
+    # Validate expected count if provided
+    if expected_cone_count is not None and len(positions) != expected_cone_count:
+        logger.warning(
+            f"Expected {expected_cone_count} cones but found {len(positions)} "
+            f"in {path.name}. Using all {len(positions)} cones."
+        )
+
+    layout = ConeLayout(cones=positions, labels=labels)
+
+    logger.info(
+        f"Loaded {layout.cone_count} cones from parquet: "
+        + ", ".join([f"({p[0]:.0f}, {p[1]:.0f})" for p in positions])
     )
 
     return layout

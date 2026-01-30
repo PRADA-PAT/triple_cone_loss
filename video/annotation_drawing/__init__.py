@@ -22,6 +22,7 @@ from .primitives import (
     draw_dashed_line,
     draw_debug_axes,
     draw_edge_zones,
+    draw_area_zone,
 )
 
 from .indicators import (
@@ -55,6 +56,7 @@ __all__ = [
     'draw_dashed_line',
     'draw_debug_axes',
     'draw_edge_zones',
+    'draw_area_zone',
     # Indicators
     'draw_ball_position_indicator',
     'draw_intention_position_indicator',

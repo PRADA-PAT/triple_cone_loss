@@ -102,7 +102,9 @@ def draw_cone_markers(
     frame: np.ndarray,
     detected_cones: List,  # List[DetectedCone]
     config: TripleConeAnnotationConfig,
-    x_offset: int = 0
+    x_offset: int = 0,
+    cone_data_list: List = None,  # List[ConeData] with bbox dimensions
+    draw_bbox: bool = True  # If True, draw bbox; if False, draw circle
 ) -> None:
     """
     Draw N cone markers using color palette.
@@ -115,18 +117,35 @@ def draw_cone_markers(
         detected_cones: List of DetectedCone objects with position and definition
         config: Annotation config
         x_offset: X offset for sidebar
+        cone_data_list: Optional list of ConeData with bbox dimensions
+        draw_bbox: If True and cone_data_list provided, draw bounding boxes
     """
     for i, cone in enumerate(detected_cones):
         color = CONE_COLOR_PALETTE[i % len(CONE_COLOR_PALETTE)]
         x, y = cone.position
         label = cone.definition.label
 
-        # Draw cone marker (filled circle with border)
-        center = (int(x) + x_offset, int(y))
-        cv2.circle(frame, center, 10, color, -1)
-        cv2.circle(frame, center, 10, (0, 0, 0), 2)
+        if draw_bbox and cone_data_list and i < len(cone_data_list):
+            # Draw bounding box
+            cone_data = cone_data_list[i]
+            half_w = cone_data.width / 2
+            half_h = cone_data.height / 2
+            x1 = int(x - half_w) + x_offset
+            y1 = int(y - half_h)
+            x2 = int(x + half_w) + x_offset
+            y2 = int(y + half_h)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            # Small center dot
+            center = (int(x) + x_offset, int(y))
+            cv2.circle(frame, center, 3, color, -1)
+        else:
+            # Draw cone marker (filled circle with border)
+            center = (int(x) + x_offset, int(y))
+            cv2.circle(frame, center, 10, color, -1)
+            cv2.circle(frame, center, 10, (0, 0, 0), 2)
 
         # Draw label above the cone
+        center = (int(x) + x_offset, int(y))
         (text_width, text_height), _ = cv2.getTextSize(
             label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
         )
@@ -503,3 +522,87 @@ def draw_edge_zones(
 
     return cv2.addWeighted(overlay, config.EDGE_ZONE_ALPHA, frame,
                            1 - config.EDGE_ZONE_ALPHA, 0)
+
+
+def draw_area_zone(
+    frame: np.ndarray,
+    detected_cones: List,  # List[DetectedCone]
+    config: TripleConeAnnotationConfig,
+    x_offset: int = 0,
+    fill_color: Tuple[int, int, int] = (255, 255, 0),  # Cyan in BGR
+    outline_color: Tuple[int, int, int] = (255, 255, 0),  # Cyan in BGR
+    fill_alpha: float = 0.25,
+    outline_thickness: int = 2
+) -> np.ndarray:
+    """
+    Draw a filled polygon connecting all 'area' type cones.
+
+    Used for chest control drill where 4 area cones form a square/quadrilateral
+    in the center of the drill.
+
+    Args:
+        frame: Canvas to draw on
+        detected_cones: List of DetectedCone objects with position and definition
+        config: Annotation config
+        x_offset: X offset for sidebar
+        fill_color: BGR color for the fill (default cyan)
+        outline_color: BGR color for the outline (default cyan)
+        fill_alpha: Opacity of the fill (0.0-1.0, default 0.25)
+        outline_thickness: Thickness of the outline (default 2)
+
+    Returns:
+        Modified frame with area zone drawn
+    """
+    # Import ConeType here to avoid circular imports
+    try:
+        from detection.data_structures import ConeType
+    except ImportError:
+        # If import fails, we can't filter by type
+        return frame
+
+    # Filter for area cones only
+    area_cones = [
+        cone for cone in detected_cones
+        if cone.definition.type == ConeType.AREA
+    ]
+
+    # Need at least 3 cones to form a polygon
+    if len(area_cones) < 3:
+        return frame
+
+    # Get cone positions with x_offset applied
+    points = []
+    for cone in area_cones:
+        x, y = cone.position
+        points.append([int(x) + x_offset, int(y)])
+
+    # Convert to numpy array for cv2
+    pts = np.array(points, dtype=np.int32)
+
+    # For 4 cones, we need to order them to form a proper quadrilateral
+    # (not a bow-tie shape). Order by angle from centroid.
+    if len(pts) == 4:
+        # Calculate centroid
+        centroid_x = np.mean(pts[:, 0])
+        centroid_y = np.mean(pts[:, 1])
+
+        # Calculate angle from centroid for each point
+        angles = np.arctan2(pts[:, 1] - centroid_y, pts[:, 0] - centroid_x)
+
+        # Sort points by angle (counter-clockwise)
+        sorted_indices = np.argsort(angles)
+        pts = pts[sorted_indices]
+
+    # Reshape for cv2.fillPoly
+    pts = pts.reshape((-1, 1, 2))
+
+    # Draw filled polygon with transparency
+    overlay = frame.copy()
+    cv2.fillPoly(overlay, [pts], fill_color)
+    frame = cv2.addWeighted(overlay, fill_alpha, frame, 1 - fill_alpha, 0)
+
+    # Draw solid outline
+    cv2.polylines(frame, [pts], isClosed=True, color=outline_color,
+                  thickness=outline_thickness, lineType=cv2.LINE_AA)
+
+    return frame

@@ -53,6 +53,7 @@ class ConeType(Enum):
     TURN = "turn"
     AREA = "area"
     WEAVE = "weave"
+    GATE = "gate"
 
 
 @dataclass
@@ -83,6 +84,10 @@ class DrillTypeConfig:
     def get_weave_cones(self) -> List[ConeDefinition]:
         """Return all weave cones."""
         return [c for c in self.cones if c.type == ConeType.WEAVE]
+
+    def get_gate_cones(self) -> List[ConeDefinition]:
+        """Return all gate cones."""
+        return [c for c in self.cones if c.type == ConeType.GATE]
 
 
 @dataclass

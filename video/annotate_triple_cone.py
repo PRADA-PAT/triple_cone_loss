@@ -154,8 +154,13 @@ def annotate_triple_cone_video(video_path: Path, parquet_dir: Path, output_path:
         return False
 
     print(f"  Loading parquet data...")
-    ball_df = load_ball_data(ball_parquets[0])
+    ball_df = load_ball_data(ball_parquets[0], use_postprocessed=config.USE_POSTPROCESSED_BALL)
     pose_df = load_pose_data(pose_parquets[0])
+    actually_used_pp = ball_df.attrs.get('using_postprocessed', False)
+    if config.USE_POSTPROCESSED_BALL and not actually_used_pp:
+        print(f"    Ball data: raw columns (fallback - no _pp columns available)")
+    else:
+        print(f"    Ball data: {'post-processed (_pp)' if actually_used_pp else 'raw'} columns")
 
     # Create lookup structures
     ball_cols = ['x1', 'y1', 'x2', 'y2', 'confidence']
@@ -645,7 +650,7 @@ def main():
     if args.list:
         print("\n Available Triple Cone videos:\n")
         for name, video_path, parquet_path in available:
-            output_path = parquet_path / f"{name}_triple_cone.mp4"
+            output_path = parquet_path / f"{name}_triple_cone_test.mp4"
             status = "[done]" if output_path.exists() else "[    ]"
             print(f"  {status} {name}")
         print(f"\nTotal: {len(available)} videos")
@@ -659,7 +664,7 @@ def main():
         fail_count = 0
 
         for i, (name, video_path, parquet_path) in enumerate(available, 1):
-            output_path = parquet_path / f"{name}_triple_cone.mp4"
+            output_path = parquet_path / f"{name}_triple_cone_test.mp4"
 
             if args.skip_existing and output_path.exists():
                 print(f"[{i}/{len(available)}] Skipping {name} (already exists)")
@@ -709,7 +714,7 @@ def main():
 
     print(f"\n Annotating {name}...\n")
 
-    output_path = parquet_path / f"{name}_triple_cone.mp4"
+    output_path = parquet_path / f"{name}_triple_cone_test.mp4"
     config = TripleConeAnnotationConfig()
     success = annotate_triple_cone_video(video_path, parquet_path, output_path, config)
 
