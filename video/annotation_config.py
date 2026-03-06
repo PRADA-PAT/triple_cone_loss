@@ -95,6 +95,20 @@ class TripleConeAnnotationConfig:
     VERTICAL_DEVIATION_COUNTER_FONT_SCALE: float = 1.2
     VERTICAL_DEVIATION_PERSIST_SECONDS: float = 3.0
 
+    # Horizontal distance escape detection
+    DRAW_HORIZONTAL_DISTANCE: bool = True
+    H_DIST_WARNING_THRESHOLD: float = 80.0   # Yellow zone start (pixels, auto-scaled)
+    H_DIST_ESCAPED_THRESHOLD: float = 120.0  # Red zone start (pixels, auto-scaled)
+    H_DIST_SAFE_COLOR: Tuple[int, int, int] = (0, 255, 0)       # Green (BGR)
+    H_DIST_WARNING_COLOR: Tuple[int, int, int] = (0, 255, 255)  # Yellow (BGR)
+    H_DIST_ESCAPED_COLOR: Tuple[int, int, int] = (0, 0, 255)    # Red (BGR)
+    H_DIST_PERSIST_COLOR: Tuple[int, int, int] = (0, 165, 255)  # Orange (BGR)
+    H_DIST_LINE_THICKNESS: int = 2
+    H_DIST_COUNTER_POS_X: int = 50
+    H_DIST_COUNTER_POS_Y: int = 400  # Below vertical deviation counter
+    H_DIST_COUNTER_FONT_SCALE: float = 1.2
+    H_DIST_PERSIST_SECONDS: float = 3.0
+
     # Ball position relative to player settings
     # NOTE: Must match detection/ball_control_detector.py thresholds
     DRAW_BALL_POSITION: bool = True
@@ -296,6 +310,14 @@ def scale_config_for_resolution(config: TripleConeAnnotationConfig, video_width:
     config.RETURN_COUNTER_POS_Y = int(config.RETURN_COUNTER_POS_Y * resolution_scale)
     config.VERTICAL_DEVIATION_COUNTER_POS_X = int(config.VERTICAL_DEVIATION_COUNTER_POS_X * resolution_scale)
     config.VERTICAL_DEVIATION_COUNTER_POS_Y = int(config.VERTICAL_DEVIATION_COUNTER_POS_Y * resolution_scale)
+
+    # Scale horizontal distance thresholds
+    config.H_DIST_WARNING_THRESHOLD *= resolution_scale
+    config.H_DIST_ESCAPED_THRESHOLD *= resolution_scale
+    config.H_DIST_COUNTER_POS_X = int(config.H_DIST_COUNTER_POS_X * resolution_scale)
+    config.H_DIST_COUNTER_POS_Y = int(config.H_DIST_COUNTER_POS_Y * resolution_scale)
+    config.H_DIST_COUNTER_FONT_SCALE *= font_scale
+    config.H_DIST_LINE_THICKNESS = max(1, int(config.H_DIST_LINE_THICKNESS * font_scale))
 
     # Scale sidebar dimensions
     config.SIDEBAR_WIDTH = max(200, int(config.SIDEBAR_WIDTH * resolution_scale))
