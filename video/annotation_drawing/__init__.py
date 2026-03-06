@@ -35,6 +35,8 @@ from .indicators import (
     draw_return_counter,
     draw_unified_tracking_indicator,
     draw_vertical_deviation_counter,
+    draw_horizontal_distance_counter,
+    draw_horizontal_distance_line,
 )
 
 __all__ = [
@@ -67,4 +69,6 @@ __all__ = [
     'draw_return_counter',
     'draw_unified_tracking_indicator',
     'draw_vertical_deviation_counter',
+    'draw_horizontal_distance_counter',
+    'draw_horizontal_distance_line',
 ]

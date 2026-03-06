@@ -460,3 +460,70 @@ def draw_vertical_deviation_counter(
     # Draw text
     cv2.putText(frame, text, (x, y), font,
                 font_scale, color, thickness, cv2.LINE_AA)
+
+
+def draw_horizontal_distance_counter(
+    frame: np.ndarray,
+    count: int,
+    is_active: bool,
+    config: TripleConeAnnotationConfig,
+    x_offset: int = 0
+) -> None:
+    """Draw horizontal distance escape counter."""
+    if count <= 0:
+        return
+
+    text = f"H-ESC: {count}f"
+    x = x_offset + config.H_DIST_COUNTER_POS_X
+    y = config.H_DIST_COUNTER_POS_Y
+
+    color = config.H_DIST_ESCAPED_COLOR if is_active else config.H_DIST_PERSIST_COLOR
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = config.H_DIST_COUNTER_FONT_SCALE
+    thickness = max(1, int(2 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+    (tw, th), _ = cv2.getTextSize(text, font, font_scale, thickness)
+
+    pad_x = max(2, int(5 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+    pad_y = max(4, int(10 * getattr(config, 'FONT_SCALE_FACTOR', 1.0)))
+
+    cv2.rectangle(frame, (x - pad_x, y - th - pad_y),
+                  (x + tw + pad_x * 2, y + pad_y), (0, 0, 0), -1)
+    cv2.putText(frame, text, (x, y), font,
+                font_scale, color, thickness, cv2.LINE_AA)
+
+
+def draw_horizontal_distance_line(
+    frame: np.ndarray,
+    ball_center: Optional[Tuple[float, float]],
+    hip_position: Optional[Tuple[float, float]],
+    color: Tuple[int, int, int],
+    config: TripleConeAnnotationConfig,
+    x_offset: int = 0
+) -> None:
+    """
+    Draw horizontal line from hip to ball at hip's Y position.
+
+    Shows the horizontal separation between player and ball.
+    Line is purely horizontal (at hip Y), colored by distance zone.
+    """
+    if ball_center is None or hip_position is None:
+        return
+
+    if any(pd.isna(v) for v in [ball_center[0], ball_center[1], hip_position[0], hip_position[1]]):
+        return
+
+    hip_x = int(hip_position[0]) + x_offset
+    hip_y = int(hip_position[1])
+    ball_x = int(ball_center[0]) + x_offset
+
+    # Draw horizontal line at hip Y
+    cv2.line(frame, (hip_x, hip_y), (ball_x, hip_y),
+             color, config.H_DIST_LINE_THICKNESS, cv2.LINE_AA)
+
+    # Draw small vertical tick marks at endpoints
+    tick_height = max(4, int(8 * config.FONT_SCALE_FACTOR))
+    cv2.line(frame, (hip_x, hip_y - tick_height), (hip_x, hip_y + tick_height),
+             color, config.H_DIST_LINE_THICKNESS, cv2.LINE_AA)
+    cv2.line(frame, (ball_x, hip_y - tick_height), (ball_x, hip_y + tick_height),
+             color, config.H_DIST_LINE_THICKNESS, cv2.LINE_AA)
