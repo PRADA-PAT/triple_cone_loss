@@ -40,14 +40,23 @@ triple_cone_loss/
 │   ├── data_loader.py            # Parquet loading
 │   ├── config.py                 # Configuration classes
 │   ├── csv_exporter.py           # CSV export functionality
-│   └── turning_zones.py          # Elliptical turning zones (CONE1, CONE2, CONE3)
+│   ├── turning_zones.py          # Elliptical turning zones (CONE1, CONE2, CONE3)
+│   ├── drill_types_config.yaml   # Drill type definitions (cone counts, types, patterns)
+│   └── drill_config_loader.py    # YAML config loader, drill type auto-detection
 │
 ├── annotation/                   # FOLDER 2: Visualization tools
 │   └── drill_visualizer.py       # Debug visualization (optional)
 │
 ├── video/                        # FOLDER 3: Video generation with loss events
-│   ├── annotate_triple_cone.py      # PRIMARY: Debug visualization (experimental features)
+│   ├── annotate_video.py            # GENERIC: Multi-drill debug visualization (any drill type)
+│   ├── annotate_triple_cone.py      # LEGACY: Triple-cone specific debug visualization
 │   ├── annotate_videos.py           # Basic overlay (parquet cones, no sidebar)
+│   ├── annotation_utils.py          # Video/parquet discovery, H.264 conversion
+│   ├── annotation_config.py         # Visualization config (thresholds, colors, toggles)
+│   ├── annotation_data.py           # Parquet loading for visualization
+│   ├── annotation_drawing.py        # Drawing primitives (sidebar, arrows, counters)
+│   ├── annotation_analysis.py       # Frame-level analysis (ball position, facing, edges)
+│   ├── turn_tracker.py              # Turn event tracking for visualization
 │   └── drill_event_tracker.py       # Cone crossing & turn event tracking
 │
 ├── __init__.py                   # Root exports (backwards compatible)
@@ -83,6 +92,20 @@ PYTHONPATH="." pytest tests/ --cov=detection
 
 # Run validation with custom frame tolerance (default: 45 frames = 1.5s)
 python run_detection.py --test --frame-tolerance 90  # 90 frames = 3.0s tolerance
+
+# --- Generic multi-drill video annotation ---
+
+# List all players across all drill types in drill_data/
+python video/annotate_video.py --drills-dir /path/to/drill_data/ --list
+
+# Annotate a single player folder (auto-detects drill type)
+python video/annotate_video.py /path/to/drill_data/dribble_pass_dribble/player_name/
+
+# Batch annotate ALL players across all drill types
+python video/annotate_video.py --drills-dir /path/to/drill_data/ --all
+
+# Force re-annotate (overwrite existing)
+python video/annotate_video.py --drills-dir /path/to/drill_data/ --all --force
 ```
 
 ## Testing & Validation
@@ -232,6 +255,20 @@ Key detection thresholds in `DetectionConfig`:
 - `loss_events.csv`: Detected loss events with timestamps and context
 - `frame_analysis.csv`: Per-frame metrics and states
 
+## Supported Drill Types
+
+Drill types are defined in `detection/drill_types_config.yaml` and auto-detected from folder path patterns:
+
+| Drill Type | Cones | Path Patterns | Turn Cones |
+|------------|-------|---------------|------------|
+| `triple_cone` | 3 | `_tc/`, `triple_cone` | All 3 |
+| `seven_cone_weave` | 7 | `7_cone_weave`, `seven_cone` | Cone 1, Cone 7 |
+| `chest_control` | 12 | `chest_control`, `_chest/` | Left, Right |
+| `figure_of_8` | 5 | `figure_of_8`, `_f8/` | Left, Start |
+| `dribble_pass_dribble` | 8 | `dribble_pass_dribble`, `_dpd/` | Left, Right |
+
+To add a new drill type, append to `drill_types_config.yaml` with `name`, `cone_count`, `path_patterns`, and `cones` list (each with `position`, `type`, `label`). Cone types: `turn`, `gate`, `weave`, `area`.
+
 ## Key Design Decisions
 
 - **3-Cone Architecture**: Uses TripleConeLayout with CONE1 (HOME), CONE2 (CENTER), CONE3 (RIGHT)
@@ -378,23 +415,33 @@ ffmpeg -y -i input.mp4 -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p -mov
 - `-movflags +faststart`: Move moov atom for web streaming
 
 **Video annotation scripts:**
-- `video/annotate_triple_cone.py`: **PRIMARY** - Full debug visualization with sidebar, turning zones, momentum arrows, counters. Use this for experimental features.
+- `video/annotate_video.py`: **GENERIC** - Multi-drill debug visualization. Supports any drill type via `drill_types_config.yaml`. Handles both legacy and drill_data/pipeline layouts. Use this for new drill types.
+- `video/annotate_triple_cone.py`: **LEGACY** - Triple-cone specific debug visualization with experimental features.
 - `video/annotate_videos.py`: Basic overlay using parquet cone detection (per-frame positions, no sidebar)
 
 ## Generating Annotated Debug Videos
 
-### Primary visualization (for experimental features):
+### Generic multi-drill annotation (recommended for new drill types):
 ```bash
-# Generate annotated video with full debug overlay
-python video/annotate_triple_cone.py <player_name>
+# Annotate a single player (auto-detects drill type from path)
+python video/annotate_video.py /path/to/drill_data/drill_type/player_name/
 
-# Example:
-python video/annotate_triple_cone.py abdullah_nasib
+# List all discoverable players
+python video/annotate_video.py --drills-dir /path/to/drill_data/ --list
+
+# Batch annotate all players (skips already-done)
+python video/annotate_video.py --drills-dir /path/to/drill_data/ --all
+```
+
+### Triple-cone specific (legacy, for experimental features):
+```bash
+python video/annotate_triple_cone.py <player_name>
 ```
 
 ### Output:
 - Creates annotated video with sidebar, turning zones, ball position, momentum arrows
-- Output saved to same directory as source video with `_annotated` suffix
+- drill_data layout: output to `features/debug_video.mp4`
+- Legacy layout: output to `{name}_annotated.mp4` alongside parquets
 - Auto-converts to H.264 for VS Code/browser compatibility
 
 ## Available Pose Keypoints
@@ -409,9 +456,11 @@ All 26 keypoints available in pose parquet for experimental features:
 
 **Currently used:** ankles (ball-foot distance), hip (movement direction, ball-behind)
 
-## File Naming Convention
+## Data Layouts
 
-Player data follows pattern:
+The system supports two data layouts:
+
+### Legacy layout (triple_cone detection pipeline)
 ```
 video_detection_pose_ball_cones/
   {player_name}_tc/
@@ -419,8 +468,32 @@ video_detection_pose_ball_cones/
     {player_name}_tc_pose.parquet
     {player_name}_tc_cone.parquet
 ```
-
 Some players use `{player_name}` without `_tc` suffix - `run_detection.py` handles both conventions.
+
+### drill_data layout (multi-drill standard)
+```
+drill_data/
+  {drill_type}/                          # e.g., triple_cone, dribble_pass_dribble
+    {player_name}/
+      video.mp4 or video.mov            # Source video
+      pipeline/                          # Parquet data from detection pipeline
+        cone.parquet
+        ball.parquet
+        pose.parquet
+        annotated.mp4                    # Pipeline's own annotation
+        raw_detections.mp4
+      features/                          # Generated analysis outputs
+        debug_video.mp4                  # Our annotated debug video (output)
+        features.csv                     # Feature extractions
+        static_plot.png
+```
+
+The video annotation system (`video/annotate_video.py`) auto-resolves parquet locations by checking:
+1. `player_path/*_cone.parquet` (legacy glob pattern)
+2. `player_path/cone.parquet` (short name)
+3. `player_path/pipeline/cone.parquet` (drill_data standard)
+
+Output goes to `features/debug_video.mp4` when using pipeline/ layout, or `{name}_annotated.mp4` for legacy layout.
 
 ## Detection Logic Deep Dive (For Porting to Other Applications)
 

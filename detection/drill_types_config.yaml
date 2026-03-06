@@ -127,3 +127,36 @@ drill_types:
       - position: 4
         type: turn
         label: turn_cone_start   # Start/rightmost cone
+
+  dribble_pass_dribble:
+    name: "Dribble Pass Dribble"
+    cone_count: 8
+    path_patterns:
+      - "dribble_pass_dribble"
+      - "_dpd/"
+      - "_dpd_"
+    cones:
+      - position: 0
+        type: turn
+        label: turn_cone_left
+      - position: 1
+        type: gate
+        label: pass_zone_1
+      - position: 2
+        type: gate
+        label: pass_zone_2
+      - position: 3
+        type: gate
+        label: pass_zone_3
+      - position: 4
+        type: gate
+        label: receive_zone_1
+      - position: 5
+        type: gate
+        label: receive_zone_2
+      - position: 6
+        type: gate
+        label: receive_zone_3
+      - position: 7
+        type: turn
+        label: turn_cone_right

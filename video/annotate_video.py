@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 try:
     from .annotation_config import TripleConeAnnotationConfig, scale_config_for_resolution, CONE_COLOR_PALETTE
-    from .annotation_utils import convert_to_h264, get_available_videos, get_drills_structure
+    from .annotation_utils import convert_to_h264, get_available_videos, get_drills_structure, resolve_parquet_dir, resolve_output_path
     from .annotation_data import (
         BallTrackingState,
         ConeData,
@@ -75,7 +75,7 @@ try:
     from .turn_tracker import TripleConeTurnTracker
 except ImportError:
     from annotation_config import TripleConeAnnotationConfig, scale_config_for_resolution, CONE_COLOR_PALETTE
-    from annotation_utils import convert_to_h264, get_available_videos, get_drills_structure
+    from annotation_utils import convert_to_h264, get_available_videos, get_drills_structure, resolve_parquet_dir, resolve_output_path
     from annotation_data import (
         BallTrackingState,
         ConeData,
@@ -262,6 +262,11 @@ def annotate_video(
     # Load cone positions from parquet
     cone_parquet = list(parquet_dir.glob("*_cone.parquet"))
     if not cone_parquet:
+        # Fallback: try exact name (drill_data convention)
+        exact = parquet_dir / "cone.parquet"
+        if exact.exists():
+            cone_parquet = [exact]
+    if not cone_parquet:
         print(f"  Error: No cone parquet found in {parquet_dir}")
         return False
 
@@ -318,7 +323,15 @@ def annotate_video(
 
     # Load parquet data
     ball_parquets = list(parquet_dir.glob("*_football.parquet"))
+    if not ball_parquets:
+        exact = parquet_dir / "ball.parquet"
+        if exact.exists():
+            ball_parquets = [exact]
     pose_parquets = list(parquet_dir.glob("*_pose.parquet"))
+    if not pose_parquets:
+        exact = parquet_dir / "pose.parquet"
+        if exact.exists():
+            pose_parquets = [exact]
 
     if not ball_parquets or not pose_parquets:
         print(f"  Error: Missing parquet files in {parquet_dir}")
@@ -942,7 +955,9 @@ def main():
                     if drill_config:
                         print(f"  Drill type: {drill_config.name}")
 
-                    output_path = player.parquet_dir / f"{player.name}_annotated.mp4"
+                    # Determine player root (parquet_dir may be pipeline/ subfolder)
+                    player_root = player.parquet_dir.parent if player.parquet_dir.name == "pipeline" else player.parquet_dir
+                    output_path = resolve_output_path(player_root, player.parquet_dir)
                     config = TripleConeAnnotationConfig()
                     success = annotate_video(player.video_path, player.parquet_dir, output_path, drill_config, config)
 
@@ -1001,27 +1016,30 @@ def main():
 
         # If data_path is a directory, use it directly
         if data_path.is_dir():
-            parquet_path = data_path
+            player_path = data_path
 
-            # Find video file in the directory
-            video_files = list(parquet_path.glob("*.mp4")) + list(parquet_path.glob("*.MOV"))
+            # Find video file in the directory (include .mov lowercase)
+            video_files = list(player_path.glob("*.mp4")) + list(player_path.glob("*.MOV")) + list(player_path.glob("*.mov"))
             source_videos = [v for v in video_files if "_annotated" not in v.name.lower()]
 
             if not source_videos:
                 # Try parent directory for video (legacy mode)
-                parent = parquet_path.parent
-                name = parquet_path.name.replace("_tc", "").replace("_triple", "")
+                parent = player_path.parent
+                name = player_path.name.replace("_tc", "").replace("_triple", "")
                 source_videos = list(parent.glob(f"*{name}*.mp4"))
 
             if not source_videos:
                 # Try videos directory (legacy mode)
-                source_videos = list(args.videos_dir.glob(f"*{parquet_path.name}*.mp4"))
+                source_videos = list(args.videos_dir.glob(f"*{player_path.name}*.mp4"))
 
             if not source_videos:
-                print(f"Error: Cannot find video for {parquet_path}")
+                print(f"Error: Cannot find video for {player_path}")
                 return 1
 
             video_path = source_videos[0]
+
+            # Resolve parquet directory (supports pipeline/ subfolder)
+            parquet_path = resolve_parquet_dir(player_path) or player_path
         else:
             # Search by name in legacy mode
             available = get_available_videos(args.videos_dir, args.parquet_dir)
@@ -1038,6 +1056,7 @@ def main():
                 return 1
 
             name, video_path, parquet_path = match
+            player_path = parquet_path  # Legacy mode: parquet dir is the player dir
 
         # Auto-detect or use explicit drill type
         drill_id = args.drill_type or loader.detect_drill_type_from_path(str(parquet_path))
@@ -1051,7 +1070,7 @@ def main():
 
         print(f"\n Annotating {video_path.name}...\n")
 
-        output_path = parquet_path / f"{parquet_path.name}_annotated.mp4"
+        output_path = resolve_output_path(player_path, parquet_path)
         config = TripleConeAnnotationConfig()
         success = annotate_video(video_path, parquet_path, output_path, drill_config, config)
 

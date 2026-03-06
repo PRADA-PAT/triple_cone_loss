@@ -125,18 +125,82 @@ def get_available_videos(videos_dir: Path, parquet_dir: Path) -> List[Tuple[str,
     return available
 
 
+def resolve_parquet_dir(player_path: Path) -> Optional[Path]:
+    """
+    Find the directory containing parquet files for a player folder.
+
+    Checks multiple locations:
+    1. player_path/*_cone.parquet (legacy pattern, e.g. name_tc_cone.parquet)
+    2. player_path/cone.parquet (short name in player dir)
+    3. player_path/pipeline/cone.parquet (drill_data standard)
+
+    Returns:
+        Path to the directory containing parquets, or None if not found
+    """
+    # Legacy pattern: player_path/*_cone.parquet, *_football.parquet, *_pose.parquet
+    if (list(player_path.glob("*_cone.parquet")) and
+            list(player_path.glob("*_football.parquet")) and
+            list(player_path.glob("*_pose.parquet"))):
+        return player_path
+
+    # Short name in player dir: cone.parquet, ball.parquet, pose.parquet
+    if ((player_path / "cone.parquet").exists() and
+            (player_path / "ball.parquet").exists() and
+            (player_path / "pose.parquet").exists()):
+        return player_path
+
+    # Pipeline subfolder: pipeline/cone.parquet, pipeline/ball.parquet, pipeline/pose.parquet
+    pipeline_dir = player_path / "pipeline"
+    if (pipeline_dir.is_dir() and
+            (pipeline_dir / "cone.parquet").exists() and
+            (pipeline_dir / "ball.parquet").exists() and
+            (pipeline_dir / "pose.parquet").exists()):
+        return pipeline_dir
+
+    return None
+
+
+def resolve_output_path(player_path: Path, parquet_dir: Path) -> Path:
+    """
+    Determine the output path for the annotated debug video.
+
+    If parquets are in a pipeline/ subfolder (drill_data convention),
+    output to features/debug_video.mp4. Otherwise use legacy naming.
+
+    Returns:
+        Path for the output video file
+    """
+    if parquet_dir.name == "pipeline" and parquet_dir.parent == player_path:
+        # drill_data convention: output to features/debug_video.mp4
+        return player_path / "features" / "debug_video.mp4"
+    else:
+        # Legacy convention: output alongside parquets
+        return parquet_dir / f"{player_path.name}_annotated.mp4"
+
+
+def check_has_output(player_path: Path) -> bool:
+    """Check if annotated output already exists (legacy or features/ convention)."""
+    # Legacy: *_annotated.mp4 in player dir
+    if list(player_path.glob("*_annotated.mp4")):
+        return True
+    # drill_data convention: features/debug_video.mp4
+    if (player_path / "features" / "debug_video.mp4").exists():
+        return True
+    return False
+
+
 def get_drills_structure(drills_dir: Path, loader: 'DrillConfigLoader') -> List[DrillFolder]:
     """
     Scan drills folder and return structure of drill types and players.
 
-    Expected structure:
+    Expected structure (supports both layouts):
         drills_dir/
           {drill_type_folder}/
             {player_folder}/
-              *.mp4 (source video)
-              *_cone.parquet
-              *_football.parquet
-              *_pose.parquet
+              *.mp4 or *.MOV (source video)
+              *_cone.parquet OR pipeline/cone.parquet
+              *_football.parquet OR pipeline/ball.parquet
+              *_pose.parquet OR pipeline/pose.parquet
 
     Args:
         drills_dir: Root directory containing drill type folders
@@ -172,27 +236,24 @@ def get_drills_structure(drills_dir: Path, loader: 'DrillConfigLoader') -> List[
             if not player_path.is_dir() or player_path.name.startswith('.'):
                 continue
 
-            # Find source video (exclude annotated outputs)
-            videos = list(player_path.glob("*.mp4")) + list(player_path.glob("*.MOV"))
+            # Find source video (exclude annotated outputs and pipeline/)
+            videos = list(player_path.glob("*.mp4")) + list(player_path.glob("*.MOV")) + list(player_path.glob("*.mov"))
             source_videos = [v for v in videos if "_annotated" not in v.name.lower()]
             if not source_videos:
                 continue
 
-            # Check for required parquet files
-            has_cone = bool(list(player_path.glob("*_cone.parquet")))
-            has_ball = bool(list(player_path.glob("*_football.parquet")))
-            has_pose = bool(list(player_path.glob("*_pose.parquet")))
-
-            if not (has_cone and has_ball and has_pose):
+            # Find parquet directory (supports legacy and pipeline/ layouts)
+            parquet_dir = resolve_parquet_dir(player_path)
+            if not parquet_dir:
                 continue
 
             # Check for existing output
-            has_output = bool(list(player_path.glob("*_annotated.mp4")))
+            has_output = check_has_output(player_path)
 
             players.append(PlayerFolder(
                 name=player_path.name,
                 video_path=source_videos[0],
-                parquet_dir=player_path,
+                parquet_dir=parquet_dir,
                 has_output=has_output
             ))
 
