@@ -223,3 +223,33 @@ def determine_ball_position_vs_intention(
         ball_hip_delta_x=delta_x,
         color=color
     )
+
+
+def calculate_horizontal_distance(
+    ball_center: Optional[Tuple[float, float]],
+    hip_position: Optional[Tuple[float, float]],
+    config: TripleConeAnnotationConfig
+) -> Optional['HorizontalDistanceResult']:
+    """
+    Calculate horizontal distance between ball and player hip.
+
+    Returns None if either position is unavailable.
+    """
+    if ball_center is None or hip_position is None:
+        return None
+
+    from ..annotation_data.structures import HorizontalDistanceResult
+
+    distance = abs(ball_center[0] - hip_position[0])
+
+    if distance >= config.H_DIST_ESCAPED_THRESHOLD:
+        zone = "ESCAPED"
+        color = config.H_DIST_ESCAPED_COLOR
+    elif distance >= config.H_DIST_WARNING_THRESHOLD:
+        zone = "WARNING"
+        color = config.H_DIST_WARNING_COLOR
+    else:
+        zone = "SAFE"
+        color = config.H_DIST_SAFE_COLOR
+
+    return HorizontalDistanceResult(distance=distance, zone=zone, color=color)

@@ -6,6 +6,7 @@ from .ball_position import (
     determine_ball_position_relative_to_player,
     determine_torso_facing,
     determine_ball_position_vs_intention,
+    calculate_horizontal_distance,
 )
 
 from .tracking_state import (
@@ -18,6 +19,7 @@ __all__ = [
     'determine_ball_position_relative_to_player',
     'determine_torso_facing',
     'determine_ball_position_vs_intention',
+    'calculate_horizontal_distance',
     # Tracking state
     'check_edge_zone_status',
     'update_ball_tracking_state',
