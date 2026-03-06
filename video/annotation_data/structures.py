@@ -28,6 +28,14 @@ class IntentionPositionResult:
 
 
 @dataclass
+class HorizontalDistanceResult:
+    """Result of horizontal distance calculation between ball and player hip."""
+    distance: float           # abs(ball_x - hip_x) in pixels
+    zone: str                 # "SAFE", "WARNING", or "ESCAPED"
+    color: Tuple[int, int, int]  # BGR color for this zone
+
+
+@dataclass
 class EdgeZoneStatus:
     """Status of ball relative to screen edges."""
     in_edge_zone: bool
