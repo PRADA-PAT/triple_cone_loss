@@ -64,6 +64,8 @@ try:
         draw_return_counter,
         draw_unified_tracking_indicator,
         draw_vertical_deviation_counter,
+        draw_horizontal_distance_counter,
+        draw_horizontal_distance_line,
     )
     from .annotation_analysis import (
         determine_ball_position_relative_to_player,
@@ -71,6 +73,7 @@ try:
         determine_ball_position_vs_intention,
         check_edge_zone_status,
         update_ball_tracking_state,
+        calculate_horizontal_distance,
     )
     from .turn_tracker import TripleConeTurnTracker
 except ImportError:
@@ -105,6 +108,8 @@ except ImportError:
         draw_return_counter,
         draw_unified_tracking_indicator,
         draw_vertical_deviation_counter,
+        draw_horizontal_distance_counter,
+        draw_horizontal_distance_line,
     )
     from annotation_analysis import (
         determine_ball_position_relative_to_player,
@@ -112,6 +117,7 @@ except ImportError:
         determine_ball_position_vs_intention,
         check_edge_zone_status,
         update_ball_tracking_state,
+        calculate_horizontal_distance,
     )
     from turn_tracker import TripleConeTurnTracker
 
@@ -428,6 +434,12 @@ def annotate_video(
     vertical_deviation_direction: str = None
     vertical_deviation_persist_frames = int(config.VERTICAL_DEVIATION_PERSIST_SECONDS * fps)
 
+    # Horizontal distance escape tracking
+    h_dist_escaped_counter: int = 0
+    h_dist_display_value: int = 0
+    h_dist_display_timer: int = 0
+    h_dist_persist_frames = int(config.H_DIST_PERSIST_SECONDS * fps)
+
     for frame_id in tqdm(range(total_frames), desc="  Annotating", unit="frame"):
         ret, video_frame = cap.read()
         if not ret:
@@ -606,6 +618,24 @@ def annotate_video(
         if vertical_deviation_display_timer > 0:
             vertical_deviation_display_timer -= 1
 
+        # Horizontal distance escape detection
+        h_dist_result = None
+        if config.DRAW_HORIZONTAL_DISTANCE:
+            h_dist_result = calculate_horizontal_distance(ball_center, current_hip, config)
+
+            if h_dist_result and h_dist_result.zone == "ESCAPED":
+                h_dist_escaped_counter += 1
+                h_dist_display_value = h_dist_escaped_counter
+                h_dist_display_timer = h_dist_persist_frames
+            else:
+                if h_dist_escaped_counter > 0:
+                    h_dist_display_value = h_dist_escaped_counter
+                    h_dist_display_timer = h_dist_persist_frames
+                h_dist_escaped_counter = 0
+
+            if h_dist_display_timer > 0:
+                h_dist_display_timer -= 1
+
         # === DRAW EVERYTHING ===
 
         # 1. Turning zones (only for turn-type cones)
@@ -708,6 +738,23 @@ def annotate_video(
                     canvas, vertical_deviation_display_value,
                     is_active=(vertical_deviation_counter > 0),
                     direction=vertical_deviation_direction,
+                    config=config, x_offset=config.SIDEBAR_WIDTH
+                )
+
+        # 14. Horizontal distance escape
+        if config.DRAW_HORIZONTAL_DISTANCE:
+            # Field line (hip to ball horizontal)
+            if h_dist_result:
+                draw_horizontal_distance_line(
+                    canvas, ball_center, current_hip, h_dist_result.color,
+                    config, x_offset=config.SIDEBAR_WIDTH
+                )
+
+            # Escaped counter
+            if h_dist_display_timer > 0 or h_dist_escaped_counter > 0:
+                draw_horizontal_distance_counter(
+                    canvas, h_dist_display_value,
+                    is_active=(h_dist_escaped_counter > 0),
                     config=config, x_offset=config.SIDEBAR_WIDTH
                 )
 
