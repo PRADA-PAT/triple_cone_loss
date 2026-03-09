@@ -8,10 +8,10 @@ from typing import Optional, Tuple
 
 try:
     from ..annotation_config import TripleConeAnnotationConfig
-    from ..annotation_data.structures import BallPositionResult, IntentionPositionResult
+    from ..annotation_data.structures import BallPositionResult, IntentionPositionResult, HorizontalDistanceResult
 except ImportError:
     from annotation_config import TripleConeAnnotationConfig
-    from annotation_data.structures import BallPositionResult, IntentionPositionResult
+    from annotation_data.structures import BallPositionResult, IntentionPositionResult, HorizontalDistanceResult
 
 
 def determine_ball_position_relative_to_player(
@@ -237,8 +237,6 @@ def calculate_horizontal_distance(
     """
     if ball_center is None or hip_position is None:
         return None
-
-    from ..annotation_data.structures import HorizontalDistanceResult
 
     distance = abs(ball_center[0] - hip_position[0])
 

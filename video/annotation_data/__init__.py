@@ -5,6 +5,7 @@ Data structures and loaders for Triple Cone annotation.
 from .structures import (
     BallPositionResult,
     IntentionPositionResult,
+    HorizontalDistanceResult,
     EdgeZoneStatus,
     BallTrackingState,
     TurnEvent,
@@ -24,6 +25,7 @@ __all__ = [
     # Structures
     'BallPositionResult',
     'IntentionPositionResult',
+    'HorizontalDistanceResult',
     'EdgeZoneStatus',
     'BallTrackingState',
     'TurnEvent',
